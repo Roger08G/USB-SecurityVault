@@ -1,0 +1,30 @@
+{
+    "compilerOptions": {
+        "composite": true,
+        "skipLibCheck": true,
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "allowSyntheticDefaultImports": true
+    },
+    "paths": {
+        "@/*": [
+            "./src/*"
+        ],
+        "@app/*": [
+            "./src/app/*"
+        ],
+        "@modules/*": [
+            "./src/modules/*"
+        ],
+        "@shared/*": [
+            "./src/shared/*"
+        ],
+        "@public/*": [
+            "./src/public/*"
+        ]
+    },
+    "jsxImportSource": "@emotion/react",
+    "include": [
+        "vite.config.ts"
+    ]
+}
