@@ -92,6 +92,9 @@ export const api = {
     financeCreateEntity: (input: EntityInput) =>
         call<FinanceEntity>('finance_create_entity', { input }),
 
+    financeUpdateEntity: (entityId: Uuid, input: EntityInput) =>
+        call<FinanceEntity>('finance_update_entity', { entityId, input }),
+
     financeDeleteEntity: (entityId: Uuid) =>
         call<void>('finance_delete_entity', { entityId }),
 

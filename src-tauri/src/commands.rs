@@ -587,6 +587,39 @@ pub fn finance_create_entity(
 }
 
 #[tauri::command]
+pub fn finance_update_entity(
+    state: State<'_, AppState>,
+    entity_id: Uuid,
+    input: EntityInput,
+) -> VaultResult<FinanceEntity> {
+    let title = input.title.trim();
+    if title.is_empty() {
+        return Err(VaultError::Invalid);
+    }
+    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let sess = require_unlocked(&mut guard)?;
+    let pos = sess
+        .data
+        .finance
+        .entities
+        .iter()
+        .position(|e| e.id == entity_id)
+        .ok_or(VaultError::Invalid)?;
+
+    {
+        let e = &mut sess.data.finance.entities[pos];
+        e.title = title.to_string();
+        e.amount_cents = input.amount_cents;
+        e.iban = input.iban.filter(|s| !s.trim().is_empty());
+        e.bank = input.bank.filter(|s| !s.trim().is_empty());
+    }
+
+    let ret = sess.data.finance.entities[pos].clone();
+    persist(sess)?;
+    Ok(ret)
+}
+
+#[tauri::command]
 pub fn finance_delete_entity(
     state: State<'_, AppState>,
     entity_id: Uuid,

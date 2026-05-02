@@ -22,7 +22,8 @@ const pageStyles = css({
     height: '100vh',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    overflowX: 'hidden',
+    overflowY: 'auto',
 });
 
 /* ── header ───────────────────────────────────────────────────────── */
@@ -172,7 +173,7 @@ export function DashboardPage({ onSelect, onLock }: DashboardPageProps) {
             <header css={headerStyles}>
                 <div css={headingGroupStyles}>
                     <h1 css={titleStyles}>
-                        Bienvenido a tu <span>órbita segura</span>
+                        Bienvenido a tu <span>Órbita Segura</span>
                     </h1>
                     <p css={subtitleStyles}>Selecciona un módulo para continuar.</p>
                 </div>

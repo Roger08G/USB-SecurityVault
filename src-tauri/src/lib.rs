@@ -38,6 +38,7 @@ pub fn run() {
             commands::get_uploads_dir,
             commands::finance_get,
             commands::finance_create_entity,
+            commands::finance_update_entity,
             commands::finance_delete_entity,
             commands::finance_create_tx,
             commands::finance_delete_tx,

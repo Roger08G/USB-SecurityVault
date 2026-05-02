@@ -270,6 +270,7 @@ export function FinancePage({ onBack, onLock }: FinancePageProps) {
     const [totpModalOpen, setTotpModalOpen] = useState(false);
 
     const [entityModalOpen, setEntityModalOpen] = useState(false);
+    const [editingEntity, setEditingEntity] = useState<FinanceEntity | null>(null);
     const [txModalOpen, setTxModalOpen] = useState<TxKind | null>(null);
     const [deleteEntity, setDeleteEntity] = useState<FinanceEntity | null>(null);
     const [deleteTx, setDeleteTx] = useState<FinanceTx | null>(null);
@@ -347,7 +348,7 @@ export function FinancePage({ onBack, onLock }: FinancePageProps) {
                     <Button variant="ghost" size="sm" leftIcon={<FiArrowLeft />} onClick={onBack}>
                         Volver
                     </Button>
-                    <h1 css={titleStyles}>Tu <span>patrimonio</span></h1>
+                    <h1 css={titleStyles}>Tu <span>Patrimonio</span></h1>
                 </div>
                 <Button variant="ghost" leftIcon={<FiLock />} onClick={onLock}>
                     Bloquear
@@ -404,7 +405,7 @@ export function FinancePage({ onBack, onLock }: FinancePageProps) {
                 <div css={sectionStyles}>
                     <div css={sectionHeaderStyles}>
                         <h2 css={sectionTitleStyles}>Entidades</h2>
-                        <Button variant="ghost" size="sm" leftIcon={<FiPlus />} onClick={() => setEntityModalOpen(true)}>
+                        <Button variant="ghost" size="sm" leftIcon={<FiPlus />} onClick={() => { setEditingEntity(null); setEntityModalOpen(true); }}>
                             Nueva entidad
                         </Button>
                     </div>
@@ -426,8 +427,8 @@ export function FinancePage({ onBack, onLock }: FinancePageProps) {
                                 </thead>
                                 <tbody>
                                     {data.entities.map((e) => (
-                                        <tr key={e.id} css={trStyles}>
-                                            <td css={tdStyles} style={{ fontWeight: 600 }}>{e.title}</td>
+                                        <tr key={e.id} css={trStyles} onClick={() => { setEditingEntity(e); setEntityModalOpen(true); }}>
+                                            <td css={tdStyles} style={{ fontWeight: 600, cursor: 'pointer' }}>{e.title}</td>
                                             <td css={tdMutedStyles}>{e.bank ?? '—'}</td>
                                             <td css={tdMonoStyles}>{e.iban ?? '—'}</td>
                                             <td css={amountCellStyles(e.amount_cents >= 0, censored)}>
@@ -436,7 +437,7 @@ export function FinancePage({ onBack, onLock }: FinancePageProps) {
                                             <td css={tdRightStyles}>
                                                 <button
                                                     css={iconBtnStyles}
-                                                    onClick={() => setDeleteEntity(e)}
+                                                    onClick={(ev) => { ev.stopPropagation(); setDeleteEntity(e); }}
                                                     title="Eliminar"
                                                 >
                                                     <FiTrash2 size={15} />
@@ -515,8 +516,9 @@ export function FinancePage({ onBack, onLock }: FinancePageProps) {
 
             <EntityFormModal
                 open={entityModalOpen}
-                onClose={() => setEntityModalOpen(false)}
-                onSaved={() => { setEntityModalOpen(false); void refresh(); }}
+                entity={editingEntity}
+                onClose={() => { setEntityModalOpen(false); setEditingEntity(null); }}
+                onSaved={() => { setEntityModalOpen(false); setEditingEntity(null); void refresh(); }}
             />
 
             <TxFormModal
@@ -663,8 +665,8 @@ function MonthlyChart({ data, censored }: { data: MonthRow[]; censored: boolean 
 /* ─────────────────────────── Entity Modal ────────────────────────── */
 
 function EntityFormModal({
-    open, onClose, onSaved,
-}: { open: boolean; onClose: () => void; onSaved: () => void }) {
+    open, onClose, onSaved, entity,
+}: { open: boolean; onClose: () => void; onSaved: () => void; entity?: FinanceEntity | null }) {
     const [title, setTitle] = useState('');
     const [amount, setAmount] = useState('0');
     const [iban, setIban] = useState('');
@@ -673,8 +675,18 @@ function EntityFormModal({
     const [err, setErr] = useState<string | null>(null);
 
     useEffect(() => {
-        if (open) { setTitle(''); setAmount('0'); setIban(''); setBank(''); setErr(null); }
-    }, [open]);
+        if (open) {
+            if (entity) {
+                setTitle(entity.title);
+                setAmount((entity.amount_cents / 100).toFixed(2));
+                setIban(entity.iban ?? '');
+                setBank(entity.bank ?? '');
+            } else {
+                setTitle(''); setAmount('0'); setIban(''); setBank('');
+            }
+            setErr(null);
+        }
+    }, [open, entity]);
 
     const submit = async () => {
         const cents = parseAmountToCents(amount);
@@ -688,7 +700,11 @@ function EntityFormModal({
                 iban: iban.trim() || null,
                 bank: bank.trim() || null,
             };
-            await api.financeCreateEntity(input);
+            if (entity) {
+                await api.financeUpdateEntity(entity.id, input);
+            } else {
+                await api.financeCreateEntity(input);
+            }
             onSaved();
         } catch (e) {
             setErr(e instanceof VaultError ? e.detail.kind : String(e));
@@ -698,16 +714,16 @@ function EntityFormModal({
     };
 
     return (
-        <Modal open={open} onClose={onClose} title="Nueva entidad" width={460}>
+        <Modal open={open} onClose={onClose} title={entity ? 'Editar entidad' : 'Nueva entidad'} width={460}>
             <div css={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <Input label="Título" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Cuenta nómina, Ahorros…" />
-                <Input label="Cantidad inicial (€)" value={amount} onChange={(e) => setAmount(e.target.value)} monospace placeholder="0.00" />
+                <Input label="Cantidad (€)" value={amount} onChange={(e) => setAmount(e.target.value)} monospace placeholder="0.00" />
                 <Input label="IBAN (opcional)" value={iban} onChange={(e) => setIban(e.target.value)} monospace placeholder="ES00 0000 0000 0000 0000 0000" />
                 <Input label="Banco (opcional)" value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Santander, BBVA…" />
                 {err && <span css={{ color: theme.color.danger, fontSize: 12 }}>{err}</span>}
                 <div css={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
                     <Button variant="ghost" onClick={onClose} disabled={busy}>Cancelar</Button>
-                    <Button onClick={submit} disabled={busy}>{busy ? 'Guardando…' : 'Crear'}</Button>
+                    <Button onClick={submit} disabled={busy}>{busy ? 'Guardando…' : entity ? 'Guardar' : 'Crear'}</Button>
                 </div>
             </div>
         </Modal>
