@@ -42,7 +42,7 @@ impl Drop for UnlockedSession {
         for g in &mut self.data.groups {
             for e in &mut g.entries {
                 e.password.zeroize();
-                e.notes.zeroize();
+                    e.notes.zeroize();
             }
         }
     }
@@ -336,7 +336,10 @@ pub fn update_entry(
         .ok_or(VaultError::Invalid)?;
     e.title = input.title;
     e.username = input.username;
-    e.password = input.password;
+    // Only overwrite password if a non-empty value is provided.
+    if !input.password.is_empty() {
+        e.password = input.password;
+    }
     e.url = input.url;
     e.notes = input.notes;
     e.tags = input.tags;
@@ -388,7 +391,6 @@ pub fn reveal_password(
     let _ = app_handle_noop();
     Ok(e.password.clone())
 }
-
 fn app_handle_noop() {}
 
 // ---------- password generator ----------

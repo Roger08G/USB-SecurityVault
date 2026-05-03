@@ -175,7 +175,7 @@ const uploadAreaStyles = css({
 /* ── empty entry ───────────────────────────────────────────────────── */
 
 const emptyEntry: EntryInput = {
-	title: '', username: '', password: '', url: '', notes: '', tags: [], icon: null,
+	title: '', username: '', password: '', url: '', notes: '', tags: [], icon: null
 };
 
 /* ── component ─────────────────────────────────────────────────────── */
@@ -187,6 +187,7 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 	const [creating, setCreating] = useState(false);
 	const [draft, setDraft] = useState<EntryInput>(emptyEntry);
 	const [pendingDelete, setPendingDelete] = useState<EntryView | null>(null);
+	const [viewMode, setViewMode] = useState<'passwords' | 'env'>('passwords');
 
 	const refresh = () => api.listEntries(group.id).then(setEntries);
 	useEffect(() => { void refresh(); }, [group.id]); // eslint-disable-line
@@ -198,6 +199,12 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 			[e.title, e.username, e.url, e.notes, ...e.tags].some((s) => s.toLowerCase().includes(q))
 		);
 	}, [entries, query]);
+
+	// Entries displayed in the current view. Env-tagged entries are hidden from the passwords table.
+	const displayed = useMemo(() => {
+		if (viewMode === 'env') return filtered.filter((e) => e.tags.includes('env'));
+		return filtered.filter((e) => !e.tags.includes('env'));
+	}, [filtered, viewMode]);
 
 	const openCreate = () => { setDraft(emptyEntry); setCreating(true); };
 	const openEdit = (e: EntryView) => {
@@ -232,9 +239,79 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 		copyEphemeral(pwd, 10_000);
 	};
 
+	// no-op viewer for env (reverted)
+
 	const generate = async () => {
 		const pwd = await api.generatePassword(50, true);
 		setDraft((d: EntryInput) => ({ ...d, password: pwd }));
+	};
+
+	// Env editor state
+	const [selectedEnvId, setSelectedEnvId] = useState<string | null>(null);
+	const [envText, setEnvText] = useState<string>('');
+
+	useEffect(() => {
+		if (viewMode === 'env') {
+			// If there are no env entries, create a default one so the editor is always available.
+			const ensureDefault = async () => {
+				if (displayed.length === 0) {
+					const input: EntryInput = { ...emptyEntry, title: 'Archivo', notes: '', tags: ['env'] };
+					const created = await api.createEntry(group.id, input);
+					await refresh();
+					setSelectedEnvId(created.id);
+					setEnvText(created.notes || '');
+					return;
+				}
+				// otherwise select first
+				const first = displayed[0];
+				if (first) {
+					setSelectedEnvId(first.id);
+					setEnvText(first.notes || '');
+				}
+			};
+			void ensureDefault();
+		}
+	}, [viewMode, displayed]);
+
+	useEffect(() => {
+		if (selectedEnvId) {
+			const e = displayed.find((it) => it.id === selectedEnvId);
+			if (e) setEnvText(e.notes || '');
+		}
+	}, [selectedEnvId, displayed]);
+
+	const saveEnvEdits = async () => {
+		if (!selectedEnvId) return;
+		const e = displayed.find((it) => it.id === selectedEnvId);
+		if (!e) return;
+		// Build EntryInput preserving password by sending empty string (backend won't overwrite)
+		const input: EntryInput = {
+			title: e.title,
+			username: e.username,
+			password: '',
+			url: e.url,
+			notes: envText,
+			tags: e.tags,
+			icon: e.icon,
+		};
+		await api.updateEntry(group.id, e.id, input);
+		await refresh();
+		// keep selection
+	};
+
+	// Syntax highlighter for the env editor: paint '=' and comment lines starting with '#'
+	const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+	const highlightEnv = (text: string) => {
+		if (!text) return '';
+		const lines = text.split('\n');
+		return lines.map((ln) => {
+			if (ln.trimStart().startsWith('#')) {
+				return `<span class="env-comment">${escapeHtml(ln)}</span>`;
+			}
+			// highlight equals signs
+			return escapeHtml(ln).replace(/=/g, '<span class="env-eq">=</span>');
+		}).join('\n');
 	};
 
 	return (
@@ -244,7 +321,13 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 					<Button variant="ghost" size="sm" leftIcon={<FiArrowLeft />} onClick={onBack}>Volver</Button>
 					<h1 css={titleStyles}>{group.name}</h1>
 				</div>
-				<Button leftIcon={<FiPlus />} onClick={openCreate}>Nueva cuenta</Button>
+				<div css={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+					<div css={{ display: 'flex', gap: 8 }}>
+						<button type="button" css={{ padding: '6px 10px', borderRadius: 8, border: viewMode === 'passwords' ? `1px solid ${theme.color.accent}` : `1px solid ${theme.color.border}`, background: viewMode === 'passwords' ? theme.color.bgElevated : 'transparent', color: theme.color.text }} onClick={() => setViewMode('passwords')}>Contraseñas</button>
+						<button type="button" css={{ padding: '6px 10px', borderRadius: 8, border: viewMode === 'env' ? `1px solid ${theme.color.accent}` : `1px solid ${theme.color.border}`, background: viewMode === 'env' ? theme.color.bgElevated : 'transparent', color: theme.color.text }} onClick={() => setViewMode('env')}>Variables</button>
+					</div>
+					<Button leftIcon={<FiPlus />} onClick={openCreate}>Nueva cuenta</Button>
+				</div>
 			</header>
 
 			<div css={toolbarStyles}>
@@ -257,93 +340,154 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 			</div>
 
 			<div css={tableWrap}>
-				<table css={tableStyles}>
-					<colgroup>
-						<col style={{ width: '5%' }} />
-						<col style={{ width: '15%' }} />
-						<col style={{ width: '40%' }} />
-						<col style={{ width: '15%' }} />
-						<col style={{ width: '5%' }} />
-						<col style={{ width: '20%' }} />
-					</colgroup>
-					<thead>
-						<tr>
-							<th css={logoCell}>#</th>
-							<th css={titleCol}>Título</th>
-							<th css={userCol}>Usuario</th>
-							<th css={pwdCol}>Contraseña</th>
-							<th css={urlCol}>URL</th>
-							<th></th>
-						</tr>
-					</thead>
-					<tbody>
-						{filtered.map((e) => (
-							<tr key={e.id} css={rowStyles}>
-								<td css={logoCell}>
-									{e.icon
-										? <img src={e.icon} alt="" css={logoImgStyles} />
-										: <div css={logoPlaceholder}>{e.title[0]?.toUpperCase() ?? '?'}</div>
-									}
-								</td>
-								<td css={titleCol}>
-									<span css={{ fontWeight: 600, color: theme.color.text }}>{trunc(e.title, 22)}</span>
-								</td>
-								<td css={userCol} onDoubleClick={() => copyEphemeral(e.username, 10_000)} title="Doble clic para copiar">
-									<span css={[monoCell, { fontSize: 13, cursor: 'copy' }]}>{trunc(e.username, 40)}</span>
-								</td>
-								<td css={pwdCol} onDoubleClick={() => copyPwd(e)} title="Doble clic para copiar">
-									<span css={[monoCell, { fontSize: 11, opacity: 0.7, cursor: 'copy' }]}>
-										{'••••••••••'}
-									</span>
-								</td>
-								<td css={[urlCol, { textAlign: 'center' }]} onClick={(ev) => ev.stopPropagation()}>
-									{e.url
-										? (
-											<button
-												type="button"
-												onClick={() => copyEphemeral(e.url, 10_000)}
-												title={`Copiar enlace: ${e.url}`}
-												css={{
-													background: 'transparent',
-													border: 'none',
-													cursor: 'pointer',
-													color: '#7dd3fc',
-													display: 'inline-flex',
-													alignItems: 'center',
-													justifyContent: 'center',
-													padding: 4,
-													fontSize: 18,
-													transition: 'color 0.15s, transform 0.15s',
-													'&:hover': { color: '#bae6fd', transform: 'scale(1.15)' },
-												}}
-											>
-												<RiLink />
-											</button>
-										)
-										: <span css={{ color: theme.color.textMuted, fontSize: 12 }}>—</span>
-									}
-								</td>
-								<td css={[{ position: 'relative' }]}>
-									{/* Floating action bar on hover */}
-									<div className="row-actions" css={rowActionsStyles} onClick={(ev) => ev.stopPropagation()}>
-										<Button size="sm" variant="ghost" onClick={() => copyPwd(e)} leftIcon={<FiCopy />} title="Copiar contraseña" />
-										<Button size="sm" variant="ghost" onClick={() => openEdit(e)} leftIcon={<FiEdit2 />} title="Editar" />
-										<Button size="sm" variant="danger" onClick={() => setPendingDelete(e)} leftIcon={<FiTrash2 />} title="Eliminar" />
-									</div>
-								</td>
-							</tr>
-						))}
-						{filtered.length === 0 && (
-							<tr>
-								<td colSpan={5}>
-									<div css={emptyStyles}>
-										Sin cuentas. Pulsa <b>Nueva cuenta</b> para empezar.
-									</div>
-								</td>
-							</tr>
+				{viewMode === 'env' ? (
+					<div css={{ padding: 24, display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+						{selectedEnvId ? (
+							<>
+								{/* Highlighted overlay + transparent textarea for editing */}
+								<div css={{ position: 'relative', flex: 1, minHeight: 0 }}>
+									<pre
+										aria-hidden
+										css={{
+											margin: 0,
+											padding: 12,
+											borderRadius: theme.radius.md,
+											border: `1px solid ${theme.color.border}`,
+											background: theme.color.bgElevated,
+											color: theme.color.text,
+											fontFamily: theme.font.mono,
+											fontSize: 13,
+											whiteSpace: 'pre-wrap',
+											wordBreak: 'break-word',
+											flex: 1,
+											overflow: 'auto',
+											minHeight: 0,
+											pointerEvents: 'none',
+											lineHeight: 1.45,
+											'& .env-eq': { color: '#ff6b9b', fontWeight: 600 },
+											'& .env-comment': { color: '#9aa0a6' },
+										}}
+										dangerouslySetInnerHTML={{ __html: highlightEnv(envText) }}
+									/>
+									<textarea
+										value={envText}
+										onChange={(e) => setEnvText(e.target.value)}
+										css={{
+											position: 'absolute',
+											top: 0, left: 0, right: 0, bottom: 0,
+											width: '100%', height: '100%',
+											padding: 12,
+											borderRadius: theme.radius.md,
+											border: 'none',
+											background: 'transparent',
+											color: 'transparent',
+											caretColor: theme.color.text,
+											resize: 'none',
+											outline: 'none',
+											fontFamily: theme.font.mono,
+											fontSize: 13,
+											lineHeight: 1.45,
+										}}
+									/>
+								</div>
+								<div css={{ display: 'flex', gap: theme.space(3), marginTop: 8 }}>
+									<Button onClick={saveEnvEdits}>Guardar</Button>
+									<Button variant="ghost" onClick={() => { const e = displayed.find((it) => it.id === selectedEnvId); if (e) setEnvText(e.notes || ''); }}>Revertir</Button>
+								</div>
+							</>
+						) : (
+							<div css={emptyStyles}></div>
 						)}
-					</tbody>
-				</table>
+					</div>
+				) : (
+					<table css={tableStyles}>
+						<colgroup>
+							<col style={{ width: '5%' }} />
+							<col style={{ width: '15%' }} />
+							<col style={{ width: '40%' }} />
+							<col style={{ width: '15%' }} />
+							<col style={{ width: '5%' }} />
+							<col style={{ width: '20%' }} />
+						</colgroup>
+						<thead>
+							<tr>
+								<th css={logoCell}>#</th>
+								<th css={titleCol}>Título</th>
+								<th css={userCol}>Usuario</th>
+								<th css={pwdCol}>Contraseña</th>
+								<th css={urlCol}>URL</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							{displayed.map((e) => (
+								<tr key={e.id} css={rowStyles}>
+									<td css={logoCell}>
+										{e.icon
+											? <img src={e.icon} alt="" css={logoImgStyles} />
+											: <div css={logoPlaceholder}>{e.title[0]?.toUpperCase() ?? '?'}</div>
+										}
+									</td>
+									<td css={titleCol}>
+										<span css={{ fontWeight: 600, color: theme.color.text }}>{trunc(e.title, 22)}</span>
+									</td>
+									<td css={userCol} onDoubleClick={() => copyEphemeral(e.username, 10_000)} title="Doble clic para copiar">
+										<span css={[monoCell, { fontSize: 13, cursor: 'copy' }]}>{trunc(e.username, 40)}</span>
+									</td>
+									<td css={pwdCol} onDoubleClick={() => copyPwd(e)} title="Doble clic para copiar">
+										<span css={[monoCell, { fontSize: 11, opacity: 0.7, cursor: 'copy' }]}>
+											{'••••••••••'}
+										</span>
+									</td>
+									<td css={[urlCol, { textAlign: 'center' }]} onClick={(ev) => ev.stopPropagation()}>
+										{e.url
+											? (
+												<button
+													type="button"
+													onClick={() => copyEphemeral(e.url, 10_000)}
+													title={`Copiar enlace: ${e.url}`}
+													css={{
+														background: 'transparent',
+														border: 'none',
+														cursor: 'pointer',
+														color: '#7dd3fc',
+														display: 'inline-flex',
+														alignItems: 'center',
+														justifyContent: 'center',
+														padding: 4,
+														fontSize: 18,
+														transition: 'color 0.15s, transform 0.15s',
+														'&:hover': { color: '#bae6fd', transform: 'scale(1.15)' },
+													}}
+												>
+													<RiLink />
+												</button>
+											)
+											: <span css={{ color: theme.color.textMuted, fontSize: 12 }}>—</span>
+										}
+									</td>
+									<td css={[{ position: 'relative' }]}>
+										{/* Floating action bar on hover */}
+										<div className="row-actions" css={rowActionsStyles} onClick={(ev) => ev.stopPropagation()}>
+											<Button size="sm" variant="ghost" onClick={() => copyPwd(e)} leftIcon={<FiCopy />} title="Copiar contraseña" />
+											<Button size="sm" variant="ghost" onClick={() => openEdit(e)} leftIcon={<FiEdit2 />} title="Editar" />
+											<Button size="sm" variant="danger" onClick={() => setPendingDelete(e)} leftIcon={<FiTrash2 />} title="Eliminar" />
+										</div>
+									</td>
+								</tr>
+							))}
+							{filtered.length === 0 && (
+								<tr>
+									<td colSpan={5}>
+										<div css={emptyStyles}>
+											Sin cuentas. Pulsa <b>Nueva cuenta</b> para empezar.
+										</div>
+									</td>
+								</tr>
+							)}
+						</tbody>
+					</table>
+				)}
 			</div>
 
 			{/* Create modal */}
@@ -368,6 +512,8 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 					</div>
 				</div>
 			</Modal>
+
+			{/* viewer reverted */}
 		</main>
 	);
 }
@@ -390,6 +536,8 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
 
 	useEffect(() => { setTagsText(draft.tags.join(', ')); }, [draft.tags]);
 
+    
+
 	// Load previously uploaded icons
 	useEffect(() => {
 		api.listUploads()
@@ -399,7 +547,7 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
 					dataUrl: convertFileSrc(it.path),
 				}))
 			))
-			.catch(() => {/* uploads dir may not exist yet */});
+			.catch(() => {/* uploads dir may not exist yet */ });
 	}, []);
 
 	const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -421,6 +569,8 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
 		});
 	};
 
+
+
 	return (
 		<form css={formStyles} onSubmit={(e) => {
 			setDraft((d: EntryInput) => ({ ...d, tags: tagsText.split(',').map((t: string) => t.trim()).filter(Boolean) }));
@@ -434,9 +584,17 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
 				{/* Current selection preview */}
 				<div css={{ display: 'flex', alignItems: 'center', gap: 12 }}>
 					{draft.icon
-						? <img src={draft.icon} css={{ width: 40, height: 40, borderRadius: 8, objectFit: 'contain', background: 'rgba(255,255,255,0.05)' }} alt="logo" />
-						: <div css={[logoPlaceholder, { width: 40, height: 40, fontSize: 18, borderRadius: 8 }]}><FiImage /></div>
+						? (
+							// If icon looks like a URL/data, render an image; otherwise assume emoji character
+							(draft.icon.startsWith('data:') || draft.icon.includes('://'))
+								? <img src={draft.icon} css={{ width: 40, height: 40, borderRadius: 8, objectFit: 'contain', background: 'rgba(255,255,255,0.05)' }} alt="logo" />
+								: <div css={[logoPlaceholder, { width: 40, height: 40, fontSize: 20, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }]}>{draft.icon}</div>
+						) : (
+							<div css={[logoPlaceholder, { width: 40, height: 40, fontSize: 18, borderRadius: 8 }]}><FiImage /></div>
+						)
 					}
+
+					{/* (Emoji picker removed) */}
 					<div
 						css={uploadAreaStyles}
 						onClick={() => fileRef.current?.click()}
