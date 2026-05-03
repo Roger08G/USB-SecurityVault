@@ -53,8 +53,13 @@ pub fn random_bytes<const N: usize>() -> [u8; N] {
 }
 
 pub fn derive_key(password: &[u8], salt: &[u8], params: &KdfParams) -> VaultResult<MasterKey> {
-    let p = Params::new(params.m_cost_kib, params.t_cost, params.p_cost, Some(KEY_LEN))
-        .map_err(|_| VaultError::Crypto)?;
+    let p = Params::new(
+        params.m_cost_kib,
+        params.t_cost,
+        params.p_cost,
+        Some(KEY_LEN),
+    )
+    .map_err(|_| VaultError::Crypto)?;
     let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, p);
 
     let mut out = [0u8; KEY_LEN];
@@ -74,7 +79,12 @@ pub fn decrypt(
     let cipher = XChaCha20Poly1305::new(key.expose_secret().into());
     let nonce = XNonce::from_slice(nonce_bytes);
     cipher
-        .decrypt(nonce, Payload { msg: ciphertext, aad })
+        .decrypt(
+            nonce,
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
         .map_err(|_| VaultError::Crypto)
 }
-

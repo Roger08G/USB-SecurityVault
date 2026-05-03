@@ -20,8 +20,16 @@ fn build(secret_b32: &str, account: &str) -> VaultResult<TOTP> {
     let bytes = Secret::Encoded(secret_b32.to_string())
         .to_bytes()
         .map_err(|_| VaultError::Invalid)?;
-    TOTP::new(Algorithm::SHA1, 6, 1, 30, bytes, Some(ISSUER.into()), account.into())
-        .map_err(|_| VaultError::Invalid)
+    TOTP::new(
+        Algorithm::SHA1,
+        6,
+        1,
+        30,
+        bytes,
+        Some(ISSUER.into()),
+        account.into(),
+    )
+    .map_err(|_| VaultError::Invalid)
 }
 
 /// Verify a 6-digit code with ±1 step tolerance (handled by totp-rs internally).

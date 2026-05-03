@@ -1,9 +1,6 @@
 //! Tauri commands exposed to the frontend.
 
-use std::{
-    path::PathBuf,
-    sync::Mutex,
-};
+use std::{path::PathBuf, sync::Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -42,7 +39,7 @@ impl Drop for UnlockedSession {
         for g in &mut self.data.groups {
             for e in &mut g.entries {
                 e.password.zeroize();
-                    e.notes.zeroize();
+                e.notes.zeroize();
             }
         }
     }
@@ -85,7 +82,10 @@ pub fn vault_status(
     let root = resolve_root(&app, root_override)?;
     let paths = VaultPaths::from_root(root);
     let initialized = paths.vault_exists();
-    let guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let (unlocked, totp_verified) = match guard.as_ref() {
         Some(s) => (true, s.totp_verified),
         None => (false, false),
@@ -170,7 +170,10 @@ pub fn vault_unlock(
 
 #[tauri::command]
 pub fn vault_verify_totp(state: State<'_, AppState>, code: String) -> VaultResult<()> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = guard.as_mut().ok_or(VaultError::Locked)?;
     let ok = totp::verify(&sess.data.totp_secret_b32, code.trim()).unwrap_or(false);
     if !ok {
@@ -184,14 +187,20 @@ pub fn vault_verify_totp(state: State<'_, AppState>, code: String) -> VaultResul
 
 #[tauri::command]
 pub fn vault_lock(state: State<'_, AppState>) -> VaultResult<()> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     *guard = None;
     Ok(())
 }
 
 #[tauri::command]
 pub fn vault_get_otpauth(state: State<'_, AppState>) -> VaultResult<String> {
-    let guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = guard.as_ref().ok_or(VaultError::Locked)?;
     totp::otpauth_uri(&sess.data.totp_secret_b32, "vault")
 }
@@ -214,7 +223,10 @@ fn persist(sess: &UnlockedSession) -> VaultResult<()> {
 
 #[tauri::command]
 pub fn list_groups(state: State<'_, AppState>) -> VaultResult<Vec<GroupSummary>> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     Ok(sess
         .data
@@ -237,7 +249,10 @@ pub fn create_group(
     description: String,
     icon: Option<String>,
 ) -> VaultResult<GroupSummary> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let g = Group {
         id: Uuid::new_v4(),
@@ -260,7 +275,10 @@ pub fn create_group(
 
 #[tauri::command]
 pub fn delete_group(state: State<'_, AppState>, group_id: Uuid) -> VaultResult<()> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     sess.data.groups.retain(|g| g.id != group_id);
     persist(sess)
@@ -270,7 +288,10 @@ pub fn delete_group(state: State<'_, AppState>, group_id: Uuid) -> VaultResult<(
 
 #[tauri::command]
 pub fn list_entries(state: State<'_, AppState>, group_id: Uuid) -> VaultResult<Vec<EntryView>> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let g = sess
         .data
@@ -287,7 +308,10 @@ pub fn create_entry(
     group_id: Uuid,
     input: EntryInput,
 ) -> VaultResult<EntryView> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let g = sess
         .data
@@ -321,7 +345,10 @@ pub fn update_entry(
     entry_id: Uuid,
     input: EntryInput,
 ) -> VaultResult<EntryView> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let g = sess
         .data
@@ -351,12 +378,11 @@ pub fn update_entry(
 }
 
 #[tauri::command]
-pub fn delete_entry(
-    state: State<'_, AppState>,
-    group_id: Uuid,
-    entry_id: Uuid,
-) -> VaultResult<()> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+pub fn delete_entry(state: State<'_, AppState>, group_id: Uuid, entry_id: Uuid) -> VaultResult<()> {
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let g = sess
         .data
@@ -375,7 +401,10 @@ pub fn reveal_password(
     group_id: Uuid,
     entry_id: Uuid,
 ) -> VaultResult<String> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let g = sess
         .data
@@ -425,24 +454,42 @@ const MAX_UPLOAD_SIZE: usize = 2 * 1024 * 1024;
 /// based on its magic bytes (defence in depth — defeats `evil.exe` renamed `evil.png`).
 fn is_supported_image(data: &[u8]) -> bool {
     // PNG
-    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) { return true; }
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return true;
+    }
     // JPEG
-    if data.starts_with(&[0xFF, 0xD8, 0xFF]) { return true; }
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return true;
+    }
     // GIF87a / GIF89a
-    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") { return true; }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return true;
+    }
     // WebP: "RIFF????WEBP"
-    if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" { return true; }
+    if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        return true;
+    }
     // BMP
-    if data.starts_with(b"BM") { return true; }
+    if data.starts_with(b"BM") {
+        return true;
+    }
     // ICO / CUR — 00 00 01/02 00
-    if data.len() >= 4 && data[0] == 0 && data[1] == 0
-        && (data[2] == 1 || data[2] == 2) && data[3] == 0 { return true; }
+    if data.len() >= 4
+        && data[0] == 0
+        && data[1] == 0
+        && (data[2] == 1 || data[2] == 2)
+        && data[3] == 0
+    {
+        return true;
+    }
     // SVG (XML or starts with <svg) — text-based, scan first 256 bytes
     if data.len() >= 5 {
         let head = &data[..data.len().min(256)];
         if let Ok(s) = std::str::from_utf8(head) {
             let t = s.trim_start();
-            if t.starts_with("<?xml") || t.starts_with("<svg") { return true; }
+            if t.starts_with("<?xml") || t.starts_with("<svg") {
+                return true;
+            }
         }
     }
     false
@@ -469,8 +516,7 @@ pub fn save_upload(
 
     let root = resolve_root(&app, root_override)?;
     let uploads_dir = root.join("uploads");
-    std::fs::create_dir_all(&uploads_dir)
-        .map_err(|e| VaultError::Internal(e.to_string()))?;
+    std::fs::create_dir_all(&uploads_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
 
     // 3. Sanitise filename: keep only safe chars, strip any path components.
     let base = std::path::Path::new(&filename)
@@ -492,8 +538,7 @@ pub fn save_upload(
         return Err(VaultError::Invalid);
     }
 
-    std::fs::write(&dest, &data)
-        .map_err(|e| VaultError::Internal(e.to_string()))?;
+    std::fs::write(&dest, &data).map_err(|e| VaultError::Internal(e.to_string()))?;
 
     Ok(safe)
 }
@@ -508,14 +553,10 @@ pub struct UploadEntry {
 
 /// Return the absolute path of the uploads directory (creating it if needed).
 #[tauri::command]
-pub fn get_uploads_dir(
-    app: AppHandle,
-    root_override: Option<String>,
-) -> VaultResult<String> {
+pub fn get_uploads_dir(app: AppHandle, root_override: Option<String>) -> VaultResult<String> {
     let root = resolve_root(&app, root_override)?;
     let uploads_dir = root.join("uploads");
-    std::fs::create_dir_all(&uploads_dir)
-        .map_err(|e| VaultError::Internal(e.to_string()))?;
+    std::fs::create_dir_all(&uploads_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
     uploads_dir
         .to_str()
         .map(|s| s.to_string())
@@ -534,15 +575,13 @@ pub fn list_uploads(
         return Ok(vec![]);
     }
     let mut entries = vec![];
-    let dir = std::fs::read_dir(&uploads_dir)
-        .map_err(|e| VaultError::Internal(e.to_string()))?;
+    let dir = std::fs::read_dir(&uploads_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
     for item in dir.flatten() {
         let path = item.path();
         if path.is_file() {
-            if let (Some(name), Some(abs)) = (
-                path.file_name().and_then(|n| n.to_str()),
-                path.to_str(),
-            ) {
+            if let (Some(name), Some(abs)) =
+                (path.file_name().and_then(|n| n.to_str()), path.to_str())
+            {
                 entries.push(UploadEntry {
                     name: name.to_string(),
                     path: abs.to_string(),
@@ -559,7 +598,10 @@ use crate::vault::{EntityInput, FinanceData, FinanceEntity, FinanceTx, TxInput};
 
 #[tauri::command]
 pub fn finance_get(state: State<'_, AppState>) -> VaultResult<FinanceData> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     Ok(sess.data.finance.clone())
 }
@@ -573,7 +615,10 @@ pub fn finance_create_entity(
     if title.is_empty() {
         return Err(VaultError::Invalid);
     }
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let entity = FinanceEntity {
         id: Uuid::new_v4(),
@@ -598,7 +643,10 @@ pub fn finance_update_entity(
     if title.is_empty() {
         return Err(VaultError::Invalid);
     }
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let pos = sess
         .data
@@ -622,31 +670,34 @@ pub fn finance_update_entity(
 }
 
 #[tauri::command]
-pub fn finance_delete_entity(
-    state: State<'_, AppState>,
-    entity_id: Uuid,
-) -> VaultResult<()> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+pub fn finance_delete_entity(state: State<'_, AppState>, entity_id: Uuid) -> VaultResult<()> {
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let before = sess.data.finance.entities.len();
     sess.data.finance.entities.retain(|e| e.id != entity_id);
     if sess.data.finance.entities.len() == before {
         return Err(VaultError::Invalid);
     }
-    sess.data.finance.transactions.retain(|t| t.entity_id != entity_id);
+    sess.data
+        .finance
+        .transactions
+        .retain(|t| t.entity_id != entity_id);
     persist(sess)?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn finance_create_tx(
-    state: State<'_, AppState>,
-    input: TxInput,
-) -> VaultResult<FinanceTx> {
+pub fn finance_create_tx(state: State<'_, AppState>, input: TxInput) -> VaultResult<FinanceTx> {
     if input.amount_cents <= 0 {
         return Err(VaultError::Invalid);
     }
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     let entity = sess
         .data
@@ -676,11 +727,11 @@ pub fn finance_create_tx(
 }
 
 #[tauri::command]
-pub fn finance_delete_tx(
-    state: State<'_, AppState>,
-    tx_id: Uuid,
-) -> VaultResult<()> {
-    let mut guard = state.inner.lock().map_err(|_| VaultError::Internal("poison".into()))?;
+pub fn finance_delete_tx(state: State<'_, AppState>, tx_id: Uuid) -> VaultResult<()> {
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
     // Find tx, reverse its effect on the entity, then remove.
     let pos = sess

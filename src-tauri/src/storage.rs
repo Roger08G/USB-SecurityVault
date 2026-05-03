@@ -69,7 +69,10 @@ impl VaultPaths {
 }
 
 /// Derive key + read & decrypt vault.dat.
-pub fn load_vault(path: &Path, password: &[u8]) -> VaultResult<(MasterKey, VaultData, Vec<u8>, Vec<u8>)> {
+pub fn load_vault(
+    path: &Path,
+    password: &[u8],
+) -> VaultResult<(MasterKey, VaultData, Vec<u8>, Vec<u8>)> {
     // returns (key, data, salt, header_bytes) so caller can re-encrypt later
     let mut f = fs::File::open(path)?;
     let mut magic = [0u8; 8];
@@ -137,7 +140,12 @@ pub fn init_vault(path: &Path, password: &[u8], data: &VaultData) -> VaultResult
 
 /// Write data using an existing key + header (re-encrypts with new nonce).
 /// Rotates backups (keeps last 10) before each write.
-pub fn save_vault(path: &Path, key: &MasterKey, header_bytes: &[u8], data: &VaultData) -> VaultResult<()> {
+pub fn save_vault(
+    path: &Path,
+    key: &MasterKey,
+    header_bytes: &[u8],
+    data: &VaultData,
+) -> VaultResult<()> {
     // --- backup rotation ---
     if path.exists() {
         if let Some(parent) = path.parent() {
@@ -156,15 +164,9 @@ pub fn save_vault(path: &Path, key: &MasterKey, header_bytes: &[u8], data: &Vaul
                 if let Ok(entries) = fs::read_dir(&backups_dir) {
                     let mut backups: Vec<_> = entries
                         .flatten()
-                        .filter(|e| {
-                            e.file_name()
-                                .to_string_lossy()
-                                .starts_with("vault_")
-                        })
+                        .filter(|e| e.file_name().to_string_lossy().starts_with("vault_"))
                         .collect();
-                    backups.sort_by_key(|e| {
-                        e.metadata().and_then(|m| m.modified()).ok()
-                    });
+                    backups.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
                     if backups.len() > 10 {
                         for old in &backups[..backups.len() - 10] {
                             let _ = fs::remove_file(old.path());
@@ -178,7 +180,12 @@ pub fn save_vault(path: &Path, key: &MasterKey, header_bytes: &[u8], data: &Vaul
     write_encrypted(path, key, header_bytes, data)
 }
 
-fn write_encrypted(path: &Path, key: &MasterKey, header_bytes: &[u8], data: &VaultData) -> VaultResult<()> {
+fn write_encrypted(
+    path: &Path,
+    key: &MasterKey,
+    header_bytes: &[u8],
+    data: &VaultData,
+) -> VaultResult<()> {
     let mut pt = serde_json::to_vec(data)?;
 
     // Prepare AAD-prefix (everything before nonce); nonce is appended after encrypt.
@@ -207,7 +214,13 @@ fn write_encrypted(path: &Path, key: &MasterKey, header_bytes: &[u8], data: &Vau
     use secrecy::ExposeSecret;
     let cipher = XChaCha20Poly1305::new(key.expose_secret().into());
     let ct = cipher
-        .encrypt(XNonce::from_slice(&nonce), Payload { msg: &pt, aad: &aad })
+        .encrypt(
+            XNonce::from_slice(&nonce),
+            Payload {
+                msg: &pt,
+                aad: &aad,
+            },
+        )
         .map_err(|_| VaultError::Crypto)?;
     pt.zeroize();
 
