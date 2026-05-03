@@ -1,7 +1,7 @@
 /** @jsxImportSource @emotion/react */
 import { css } from '@emotion/react';
 import { useEffect, useState } from 'react';
-import { FiLock, FiShield, FiKey, FiCopy, FiCheck } from 'react-icons/fi';
+import { FiLock, FiShield, FiCopy, FiCheck } from 'react-icons/fi';
 import { LuKeyRound } from "react-icons/lu";
 import { HiOutlineRocketLaunch } from 'react-icons/hi2';
 import { QRCodeSVG } from 'qrcode.react';
@@ -123,12 +123,7 @@ const toggleStyles = css({
     '&:hover': { color: theme.color.accentGlow },
 });
 
-const warningStyles = css({
-    fontSize: 12,
-    color: theme.color.warn,
-    textAlign: 'center',
-    lineHeight: 1.5,
-});
+// warningStyles removed (unused)
 
 function describeError(err: unknown): string {
     if (err instanceof VaultError) {

@@ -2,7 +2,7 @@
 import { css } from '@emotion/react';
 import { LuKeyRound } from 'react-icons/lu';
 import { FiLock } from "react-icons/fi";
-import { FiTrendingUp, FiLogOut } from 'react-icons/fi';
+import { FiTrendingUp } from 'react-icons/fi';
 import { Button } from '@shared/components/Button';
 import { theme } from '@shared/theme';
 
