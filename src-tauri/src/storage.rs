@@ -136,7 +136,45 @@ pub fn init_vault(path: &Path, password: &[u8], data: &VaultData) -> VaultResult
 }
 
 /// Write data using an existing key + header (re-encrypts with new nonce).
+/// Rotates backups (keeps last 10) before each write.
 pub fn save_vault(path: &Path, key: &MasterKey, header_bytes: &[u8], data: &VaultData) -> VaultResult<()> {
+    // --- backup rotation ---
+    if path.exists() {
+        if let Some(parent) = path.parent() {
+            let backups_dir = parent.join("backups");
+            if backups_dir.exists() {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let backup_name = format!("vault_{}.dat", ts);
+                let backup_path = backups_dir.join(backup_name);
+                let _ = fs::copy(path, &backup_path);
+
+                // Keep only the last 10 backups (oldest deleted first)
+                if let Ok(entries) = fs::read_dir(&backups_dir) {
+                    let mut backups: Vec<_> = entries
+                        .flatten()
+                        .filter(|e| {
+                            e.file_name()
+                                .to_string_lossy()
+                                .starts_with("vault_")
+                        })
+                        .collect();
+                    backups.sort_by_key(|e| {
+                        e.metadata().and_then(|m| m.modified()).ok()
+                    });
+                    if backups.len() > 10 {
+                        for old in &backups[..backups.len() - 10] {
+                            let _ = fs::remove_file(old.path());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // -----------------------
     write_encrypted(path, key, header_bytes, data)
 }
 

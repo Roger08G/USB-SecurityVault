@@ -1,0 +1,10 @@
+[AutoRun]
+; NOTE: Windows Vista+ ignores the 'open' and 'shellexecute' entries for USB drives
+; (disabled system-wide for security). This file only sets the drive label and icon.
+label=USB Vault
+icon=usb-vault.exe,0
+
+[Content]
+MusicFiles=false
+PictureFiles=false
+VideoFiles=false

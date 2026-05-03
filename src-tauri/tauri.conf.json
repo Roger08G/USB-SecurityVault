@@ -1,8 +1,8 @@
 {
 	"$schema": "https://schema.tauri.app/config/2",
-	"productName": "usb-vault",
-	"version": "0.1.0",
-	"identifier": "com.roger-gómez-martíne.usb-vault",
+	"productName": "USB Vault",
+	"version": "1.0.0",
+	"identifier": "com.rogergomez.usbvault",
 	"build": {
 		"beforeDevCommand": "npm run dev",
 		"devUrl": "http://localhost:1420",
@@ -10,13 +10,6 @@
 		"frontendDist": "../dist"
 	},
 	"app": {
-		"windows": [
-			{
-				"title": "USB Vault",
-				"width": 1260,
-				"height": 820
-			}
-		],
 		"security": {
 			"csp": null,
 			"assetProtocol": {
@@ -29,9 +22,14 @@
 	},
 	"bundle": {
 		"active": true,
-		"targets": "all",
+		"targets": ["nsis"],
 		"icon": [
 			"../public/icon.png"
-		]
+		],
+		"windows": {
+			"nsis": {
+				"installMode": "currentUser"
+			}
+		}
 	}
 }

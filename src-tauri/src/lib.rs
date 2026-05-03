@@ -10,13 +10,40 @@ mod totp;
 mod vault;
 
 use commands::AppState;
+use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+/// Returns the directory that contains the running executable.
+/// All portable data (vault, cache) lives here — on the USB drive.
+fn exe_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let ctx = tauri::generate_context!();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // Redirect the WebView2 user-data directory to the USB drive instead of
+            // the host's AppData. This means no browser cache, cookies or logs are
+            // written to the host machine.
+            let webview_cache = exe_dir().join(".wv");
+
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("".into()))
+                .title("USB Vault")
+                .inner_size(1260.0, 820.0)
+                .resizable(true)
+                .data_directory(webview_cache)
+                .build()?;
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
             commands::vault_init,
@@ -43,6 +70,13 @@ pub fn run() {
             commands::finance_create_tx,
             commands::finance_delete_tx,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(ctx)
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // On clean exit: wipe the WebView2 cache from the USB so it doesn't
+            // accumulate session data between uses.
+            if let tauri::RunEvent::Exit = event {
+                let _ = std::fs::remove_dir_all(exe_dir().join(".wv"));
+            }
+        });
 }
