@@ -1,0 +1,9 @@
+# Generated
+.next/
+node_modules/
+bun.lock
+*.tsbuildinfo
+dist/
+
+# Static assets
+public/
