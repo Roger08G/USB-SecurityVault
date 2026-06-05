@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from "react";
 
 /**
  * Calls `onIdle` after `timeoutMs` of no user activity.
@@ -16,14 +16,16 @@ export function useAutoLock(enabled: boolean, timeoutMs: number, onIdle: () => v
             window.clearTimeout(timer);
             timer = window.setTimeout(() => cb.current(), timeoutMs);
         };
-        const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'] as const;
+        const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"] as const;
         events.forEach((e) => window.addEventListener(e, reset, { passive: true }));
-        const onVis = () => { if (document.hidden) cb.current(); };
-        document.addEventListener('visibilitychange', onVis);
+        const onVis = () => {
+            if (document.hidden) cb.current();
+        };
+        document.addEventListener("visibilitychange", onVis);
         return () => {
             window.clearTimeout(timer);
             events.forEach((e) => window.removeEventListener(e, reset));
-            document.removeEventListener('visibilitychange', onVis);
+            document.removeEventListener("visibilitychange", onVis);
         };
     }, [enabled, timeoutMs]);
 }

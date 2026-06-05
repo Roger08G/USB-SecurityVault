@@ -1,4 +1,4 @@
-import { writeText, clear } from '@tauri-apps/plugin-clipboard-manager';
+import { writeText, clear } from "@tauri-apps/plugin-clipboard-manager";
 
 /**
  * Copy `value` to the clipboard and clear it after `timeoutMs` by

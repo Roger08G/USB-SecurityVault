@@ -47,16 +47,16 @@ export interface EntryInput {
 }
 
 export type VaultErrorKind =
-    | { kind: 'invalid' }
-    | { kind: 'locked' }
-    | { kind: 'already_initialized' }
-    | { kind: 'not_initialized' }
-    | { kind: 'rate_limited'; seconds: number }
-    | { kind: 'internal'; message: string };
+    | { kind: "invalid" }
+    | { kind: "locked" }
+    | { kind: "already_initialized" }
+    | { kind: "not_initialized" }
+    | { kind: "rate_limited"; seconds: number }
+    | { kind: "internal"; message: string };
 
 /* ───────────────────────────── Finance ───────────────────────────── */
 
-export type TxKind = 'income' | 'expense';
+export type TxKind = "income" | "expense";
 
 export interface FinanceEntity {
     id: Uuid;
