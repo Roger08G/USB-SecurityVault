@@ -1,6 +1,6 @@
 # USB Vault
 
-USB Vault es una aplicación portable (Tauri + Rust + React) para almacenar contraseñas y variables de entorno cifradas directamente en un pendrive. Está diseñada para ejecutarse desde la unidad USB sin dejar datos persistentes en el equipo host.
+USB Vault es una aplicación portable (Tauri + Rust + React) para almacenar contraseñas cifradas directamente en un pendrive. Está diseñada para ejecutarse desde la unidad USB sin dejar datos persistentes en el equipo host.
 
 ![imagen](./assets/Captura%20de%20pantalla%202026-06-05%20204613.png)
 
@@ -13,7 +13,6 @@ USB Vault es una aplicación portable (Tauri + Rust + React) para almacenar cont
 - Vault cifrado con XChaCha20-Poly1305 y derivación de clave (Argon2).
 - Datos persistentes junto al ejecutable, con los `.dat` dentro de `data/` (`data/vault.dat`, `data/config.dat`, `data/backups/`) e iconos en `icons/`.
 - Backup automático antes de cada guardado (retención: últimas 10 copias).
-- Editor de variables (modo `Variables`) para guardar archivos tipo `.env` dentro del vault.
 - UI portable basada en Tauri (WebView2 en Windows). WebView2 user-data redirigido al USB y borrado al salir.
 
 ## Estructura de archivos (en la unidad USB)
