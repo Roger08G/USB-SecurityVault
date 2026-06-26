@@ -445,7 +445,7 @@ pub fn generate_password(length: usize, symbols: bool) -> String {
         .collect()
 }
 
-// ---------- uploads ----------
+// ---------- icons ----------
 
 /// Maximum size in bytes that an uploaded file may have (2 MiB).
 const MAX_UPLOAD_SIZE: usize = 2 * 1024 * 1024;
@@ -495,10 +495,10 @@ fn is_supported_image(data: &[u8]) -> bool {
     false
 }
 
-/// Save a file to the `uploads/` folder next to vault.dat.
-/// `data` is the raw bytes (sent as base64 from the frontend via serde).
+/// Save an icon file to the `icons/` folder next to vault.dat.
+/// `data` is the raw bytes sent from the frontend.
 #[tauri::command]
-pub fn save_upload(
+pub fn save_icon(
     app: AppHandle,
     filename: String,
     data: Vec<u8>,
@@ -515,8 +515,8 @@ pub fn save_upload(
     }
 
     let root = resolve_root(&app, root_override)?;
-    let uploads_dir = root.join("uploads");
-    std::fs::create_dir_all(&uploads_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
+    let icons_dir = VaultPaths::from_root(root).icons;
+    std::fs::create_dir_all(&icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
 
     // 3. Sanitise filename: keep only safe chars, strip any path components.
     let base = std::path::Path::new(&filename)
@@ -531,16 +531,32 @@ pub fn save_upload(
         return Err(VaultError::Invalid);
     }
 
-    // 4. Resolve the destination and verify it stays inside `uploads_dir`
+    // 4. Resolve the destination and verify it stays inside `icons_dir`
     //    (defence in depth against path traversal).
-    let dest = uploads_dir.join(&safe);
-    if dest.parent() != Some(uploads_dir.as_path()) {
+    let mut dest = icons_dir.join(&safe);
+    if dest.parent() != Some(icons_dir.as_path()) {
         return Err(VaultError::Invalid);
+    }
+    let mut stored_name = safe.clone();
+    if dest.exists() {
+        let path = std::path::Path::new(&safe);
+        let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("icon");
+        let ext = path.extension().and_then(|n| n.to_str()).unwrap_or("");
+        let suffix = Uuid::new_v4().simple().to_string();
+        stored_name = if ext.is_empty() {
+            format!("{}_{}", stem, suffix)
+        } else {
+            format!("{}_{}.{}", stem, suffix, ext)
+        };
+        dest = icons_dir.join(&stored_name);
+        if dest.parent() != Some(icons_dir.as_path()) {
+            return Err(VaultError::Invalid);
+        }
     }
 
     std::fs::write(&dest, &data).map_err(|e| VaultError::Internal(e.to_string()))?;
 
-    Ok(safe)
+    Ok(stored_name)
 }
 
 #[derive(Serialize)]
@@ -551,31 +567,31 @@ pub struct UploadEntry {
     pub path: String,
 }
 
-/// Return the absolute path of the uploads directory (creating it if needed).
+/// Return the absolute path of the icons directory (creating it if needed).
 #[tauri::command]
-pub fn get_uploads_dir(app: AppHandle, root_override: Option<String>) -> VaultResult<String> {
+pub fn get_icons_dir(app: AppHandle, root_override: Option<String>) -> VaultResult<String> {
     let root = resolve_root(&app, root_override)?;
-    let uploads_dir = root.join("uploads");
-    std::fs::create_dir_all(&uploads_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
-    uploads_dir
+    let icons_dir = VaultPaths::from_root(root).icons;
+    std::fs::create_dir_all(&icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
+    icons_dir
         .to_str()
         .map(|s| s.to_string())
         .ok_or_else(|| VaultError::Internal("non-UTF8 path".into()))
 }
 
-/// List all files in the `uploads/` folder, returning names and absolute paths.
+/// List all files in the `icons/` folder, returning names and absolute paths.
 #[tauri::command]
-pub fn list_uploads(
+pub fn list_icons(
     app: AppHandle,
     root_override: Option<String>,
 ) -> VaultResult<Vec<UploadEntry>> {
     let root = resolve_root(&app, root_override)?;
-    let uploads_dir = root.join("uploads");
-    if !uploads_dir.exists() {
+    let icons_dir = VaultPaths::from_root(root).icons;
+    if !icons_dir.exists() {
         return Ok(vec![]);
     }
     let mut entries = vec![];
-    let dir = std::fs::read_dir(&uploads_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
+    let dir = std::fs::read_dir(&icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
     for item in dir.flatten() {
         let path = item.path();
         if path.is_file() {

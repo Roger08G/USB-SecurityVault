@@ -77,12 +77,12 @@ export const api = {
     generatePassword: (length: number, symbols: boolean) =>
         call<string>("generate_password", { length, symbols }),
 
-    saveUpload: (filename: string, data: number[]) =>
-        call<string>("save_upload", { filename, data }),
+    saveIcon: (filename: string, data: number[]) =>
+        call<string>("save_icon", { filename, data }),
 
-    listUploads: () => call<{ name: string; path: string }[]>("list_uploads"),
+    listIcons: () => call<{ name: string; path: string }[]>("list_icons"),
 
-    getUploadsDir: () => call<string>("get_uploads_dir"),
+    getIconsDir: () => call<string>("get_icons_dir"),
 
     financeGet: () => call<FinanceData>("finance_get"),
 

@@ -22,6 +22,13 @@ import { Input } from "@shared/components/Input";
 import { Modal } from "@shared/components/Modal";
 import { theme } from "@shared/theme";
 import { copyEphemeral } from "@shared/clipboard";
+import {
+    extractIconName,
+    isStoredImageIcon,
+    normalizeIconForStorage,
+    resolveIconSrc,
+    toIconRef,
+} from "@shared/iconAssets";
 
 interface GroupTablePageProps {
     group: GroupSummary;
@@ -233,11 +240,18 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
     const [draft, setDraft] = useState<EntryInput>(emptyEntry);
     const [pendingDelete, setPendingDelete] = useState<EntryView | null>(null);
     const [viewMode, setViewMode] = useState<"passwords" | "env">("passwords");
+    const [iconsDir, setIconsDir] = useState<string | null>(null);
 
     const refresh = () => api.listEntries(group.id).then(setEntries);
     useEffect(() => {
         void refresh();
     }, [group.id]); // eslint-disable-line
+
+    useEffect(() => {
+        api.getIconsDir()
+            .then(setIconsDir)
+            .catch(() => setIconsDir(null));
+    }, []);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -272,17 +286,22 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
         });
     };
 
-    const submitCreate = async (ev: React.FormEvent) => {
+    const normalizeDraft = (input: EntryInput): EntryInput => ({
+        ...input,
+        icon: normalizeIconForStorage(input.icon),
+    });
+
+    const submitCreate = async (ev: React.FormEvent, input: EntryInput) => {
         ev.preventDefault();
-        await api.createEntry(group.id, draft);
+        await api.createEntry(group.id, normalizeDraft(input));
         setCreating(false);
         await refresh();
     };
 
-    const submitEdit = async (ev: React.FormEvent) => {
+    const submitEdit = async (ev: React.FormEvent, input: EntryInput) => {
         ev.preventDefault();
         if (!editing) return;
-        await api.updateEntry(group.id, editing.id, draft);
+        await api.updateEntry(group.id, editing.id, normalizeDraft(input));
         setEditing(null);
         await refresh();
     };
@@ -357,7 +376,7 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
             url: e.url,
             notes: envText,
             tags: e.tags,
-            icon: e.icon,
+            icon: normalizeIconForStorage(e.icon),
         };
         await api.updateEntry(group.id, e.id, input);
         await refresh();
@@ -551,8 +570,12 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
                             {displayed.map((e) => (
                                 <tr key={e.id} css={rowStyles}>
                                     <td css={logoCell}>
-                                        {e.icon ? (
-                                            <img src={e.icon} alt="" css={logoImgStyles} />
+                                        {resolveIconSrc(e.icon, iconsDir) ? (
+                                            <img
+                                                src={resolveIconSrc(e.icon, iconsDir) ?? ""}
+                                                alt=""
+                                                css={logoImgStyles}
+                                            />
                                         ) : (
                                             <div css={logoPlaceholder}>
                                                 {e.title[0]?.toUpperCase() ?? "?"}
@@ -678,6 +701,7 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
             >
                 <EntryForm
                     draft={draft}
+                    iconsDir={iconsDir}
                     setDraft={setDraft}
                     onSubmit={submitCreate}
                     onGenerate={generate}
@@ -694,6 +718,7 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
             >
                 <EntryForm
                     draft={draft}
+                    iconsDir={iconsDir}
                     setDraft={setDraft}
                     onSubmit={submitEdit}
                     onGenerate={generate}
@@ -739,15 +764,25 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 
 interface EntryFormProps {
     draft: EntryInput;
+    iconsDir: string | null;
     setDraft: (updater: (prev: EntryInput) => EntryInput) => void;
-    onSubmit: (e: React.FormEvent) => void;
+    onSubmit: (e: React.FormEvent, input: EntryInput) => void;
     onGenerate: () => void;
     submitLabel: string;
 }
 
-function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: EntryFormProps) {
+function EntryForm({
+    draft,
+    iconsDir,
+    setDraft,
+    onSubmit,
+    onGenerate,
+    submitLabel,
+}: EntryFormProps) {
     const [tagsText, setTagsText] = useState(draft.tags.join(", "));
-    const [uploads, setUploads] = useState<{ name: string; dataUrl: string }[]>([]);
+    const [uploadedIcons, setUploadedIcons] = useState<
+        { name: string; src: string; ref: string }[]
+    >([]);
     const [showPwd, setShowPwd] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
@@ -757,17 +792,18 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
 
     // Load previously uploaded icons
     useEffect(() => {
-        api.listUploads()
+        api.listIcons()
             .then((items: { name: string; path: string }[]) =>
-                setUploads(
+                setUploadedIcons(
                     items.map((it) => ({
                         name: it.name,
-                        dataUrl: convertFileSrc(it.path),
+                        src: convertFileSrc(it.path),
+                        ref: toIconRef(it.name),
                     })),
                 ),
             )
             .catch(() => {
-                /* uploads dir may not exist yet */
+                /* icons dir may not exist yet */
             });
     }, []);
 
@@ -776,32 +812,33 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
         if (!file) return;
         const arrayBuf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(arrayBuf));
-        // Save to uploads folder and get the safe filename back
-        const safeName = await api.saveUpload(file.name, bytes);
-        // Get uploads dir to build the asset URL
-        const uploadsDir = await api.getUploadsDir();
-        const filePath = `${uploadsDir}/${safeName}`;
-        const assetUrl = convertFileSrc(filePath);
-        // Store the asset URL directly (no heavy base64 in vault)
-        setDraft((d: EntryInput) => ({ ...d, icon: assetUrl }));
-        setUploads((prev) => {
+        const safeName = await api.saveIcon(file.name, bytes);
+        const iconsPath = await api.getIconsDir();
+        const iconRef = toIconRef(safeName);
+        const iconSrc = convertFileSrc(`${iconsPath}/${safeName}`);
+        setDraft((d: EntryInput) => ({ ...d, icon: iconRef }));
+        setUploadedIcons((prev) => {
             const exists = prev.some((u) => u.name === safeName);
-            return exists ? prev : [...prev, { name: safeName, dataUrl: assetUrl }];
+            return exists ? prev : [...prev, { name: safeName, src: iconSrc, ref: iconRef }];
         });
     };
+
+    const previewSrc = resolveIconSrc(draft.icon, iconsDir);
 
     return (
         <form
             css={formStyles}
             onSubmit={(e) => {
-                setDraft((d: EntryInput) => ({
-                    ...d,
+                const input = {
+                    ...draft,
                     tags: tagsText
                         .split(",")
                         .map((t: string) => t.trim())
                         .filter(Boolean),
-                }));
-                onSubmit(e);
+                    icon: normalizeIconForStorage(draft.icon),
+                };
+                setDraft(() => input);
+                onSubmit(e, input);
             }}
         >
             {/* Logo picker */}
@@ -819,10 +856,9 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
                 {/* Current selection preview */}
                 <div css={{ display: "flex", alignItems: "center", gap: 12 }}>
                     {draft.icon ? (
-                        // If icon looks like a URL/data, render an image; otherwise assume emoji character
-                        draft.icon.startsWith("data:") || draft.icon.includes("://") ? (
+                        isStoredImageIcon(draft.icon) && previewSrc ? (
                             <img
-                                src={draft.icon}
+                                src={previewSrc}
                                 css={{
                                     width: 40,
                                     height: 40,
@@ -875,17 +911,19 @@ function EntryForm({ draft, setDraft, onSubmit, onGenerate, submitLabel }: Entry
                     />
                 </div>
                 {/* Previously uploaded */}
-                {uploads.length > 0 && (
+                {uploadedIcons.length > 0 && (
                     <div css={iconGridStyles}>
-                        {uploads.map((u) => (
+                        {uploadedIcons.map((u) => (
                             <img
                                 key={u.name}
-                                src={u.dataUrl}
+                                src={u.src}
                                 alt={u.name}
                                 title={u.name}
-                                css={iconThumbStyles(draft.icon === u.dataUrl)}
+                                css={iconThumbStyles(
+                                    draft.icon === u.ref || extractIconName(draft.icon) === u.name,
+                                )}
                                 onClick={() =>
-                                    setDraft((d: EntryInput) => ({ ...d, icon: u.dataUrl }))
+                                    setDraft((d: EntryInput) => ({ ...d, icon: u.ref }))
                                 }
                             />
                         ))}

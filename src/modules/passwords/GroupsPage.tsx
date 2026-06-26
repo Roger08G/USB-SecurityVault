@@ -2,13 +2,13 @@
 import { css } from "@emotion/react";
 import { useEffect, useRef, useState } from "react";
 import { FiArrowLeft, FiPlus, FiUsers, FiTrash2, FiImage, FiAlertTriangle } from "react-icons/fi";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "@shared/api";
 import type { GroupSummary } from "@shared/types";
 import { Button } from "@shared/components/Button";
 import { Input } from "@shared/components/Input";
 import { Modal } from "@shared/components/Modal";
 import { theme } from "@shared/theme";
+import { resolveIconSrc, toIconRef } from "@shared/iconAssets";
 
 interface GroupsPageProps {
     onBack: () => void;
@@ -204,7 +204,8 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
     const [deleting, setDeleting] = useState(false);
     const [name, setName] = useState("");
     const [desc, setDesc] = useState("");
-    const [bannerDataUrl, setBannerDataUrl] = useState<string | null>(null);
+    const [bannerIconRef, setBannerIconRef] = useState<string | null>(null);
+    const [iconsDir, setIconsDir] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const refresh = () => {
@@ -216,25 +217,33 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
 
     useEffect(refresh, []);
 
+    useEffect(() => {
+        api.getIconsDir()
+            .then(setIconsDir)
+            .catch(() => setIconsDir(null));
+    }, []);
+
     const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
         // Save to disk
         const arrayBuf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(arrayBuf));
-        const safeName = await api.saveUpload(file.name, bytes);
-        const uploadsDir = await api.getUploadsDir();
-        const assetUrl = convertFileSrc(`${uploadsDir}/${safeName}`);
-        setBannerDataUrl(assetUrl);
+        const safeName = await api.saveIcon(file.name, bytes);
+        if (!iconsDir) {
+            const dir = await api.getIconsDir();
+            setIconsDir(dir);
+        }
+        setBannerIconRef(toIconRef(safeName));
     };
 
     const submitCreate = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!name.trim()) return;
-        await api.createGroup(name.trim(), desc.trim(), bannerDataUrl ?? null);
+        await api.createGroup(name.trim(), desc.trim(), bannerIconRef);
         setName("");
         setDesc("");
-        setBannerDataUrl(null);
+        setBannerIconRef(null);
         setCreating(false);
         refresh();
     };
@@ -301,7 +310,11 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
                                 </div>
                             )}
                             <div css={cardImageStyles(idx)}>
-                                {g.icon ? <img src={g.icon} alt={g.name} /> : <FiUsers />}
+                                {resolveIconSrc(g.icon, iconsDir) ? (
+                                    <img src={resolveIconSrc(g.icon, iconsDir) ?? ""} alt={g.name} />
+                                ) : (
+                                    <FiUsers />
+                                )}
                             </div>
                             <div css={cardDividerStyles} />
                             <div css={cardInfoStyles}>
@@ -319,15 +332,15 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
                 open={creating}
                 onClose={() => {
                     setCreating(false);
-                    setBannerDataUrl(null);
+                    setBannerIconRef(null);
                 }}
                 title="Nueva categoría"
             >
                 <form css={formStyles} onSubmit={submitCreate}>
                     {/* Banner upload */}
                     <div css={uploadAreaStyles} onClick={() => fileInputRef.current?.click()}>
-                        {bannerDataUrl ? (
-                            <img src={bannerDataUrl} alt="banner" />
+                        {resolveIconSrc(bannerIconRef, iconsDir) ? (
+                            <img src={resolveIconSrc(bannerIconRef, iconsDir) ?? ""} alt="banner" />
                         ) : (
                             <>
                                 <FiImage style={{ fontSize: 28 }} />
