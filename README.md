@@ -11,7 +11,7 @@ USB Vault es una aplicación portable (Tauri + Rust + React) para almacenar cont
 ## Características
 
 - Vault cifrado con XChaCha20-Poly1305 y derivación de clave (Argon2).
-- Datos persistentes en la misma carpeta que el ejecutable (`vault.dat`, `config.dat`, `backups/`, `icons/`).
+- Datos persistentes junto al ejecutable, con los `.dat` dentro de `data/` (`data/vault.dat`, `data/config.dat`, `data/backups/`) e iconos en `icons/`.
 - Backup automático antes de cada guardado (retención: últimas 10 copias).
 - Editor de variables (modo `Variables`) para guardar archivos tipo `.env` dentro del vault.
 - UI portable basada en Tauri (WebView2 en Windows). WebView2 user-data redirigido al USB y borrado al salir.
@@ -23,9 +23,10 @@ TuPen/
   usb-vault.exe        # El binario compilado (portable)
   Abrir Vault.bat      # Launcher (doble-clic)
   autorun.inf          # Sólo para icono/label (autorun limitado en Windows modernos)
-  vault.dat            # Archivo cifrado del vault (se crea al inicializar)
-  config.dat           # Estado no secreto (rate-limit, etc.)
-  backups/             # Copias automáticas cifradas (últimas 10)
+  data/
+    vault.dat          # Archivo cifrado del vault (se crea al inicializar)
+    config.dat         # Estado no secreto (rate-limit, etc.)
+    backups/           # Copias automáticas cifradas (últimas 10)
   icons/               # Imagenes subidas para cuentas
 ```
 
@@ -72,7 +73,7 @@ Windows Vista y posteriores bloquean la ejecución automática desde USB por seg
 
 ## Actualizaciones del binario
 
-Para actualizar la aplicación en el pen basta con reemplazar `usb-vault.exe` por la nueva versión. Como los datos (`vault.dat`, `config.dat`, `backups/`) están en la misma carpeta, no se perderán.
+Para actualizar la aplicación en el pen basta con reemplazar `usb-vault.exe` por la nueva versión. Como los datos (`data/vault.dat`, `data/config.dat`, `data/backups/`) están en una carpeta separada, no se perderán.
 
 ## Seguridad y privacidad (qué cubre, qué no)
 
@@ -88,8 +89,8 @@ Limitaciones que no puede controlar la app:
 
 ## Respaldos y recuperación
 
-- El vault crea una copia en `backups/` antes de cada guardado y mantiene las últimas 10 copias.
-- Para restaurar, sustituye `vault.dat` por una copia antigua de `backups/` y abre la app con la contraseña correcta.
+- El vault crea una copia en `data/backups/` antes de cada guardado y mantiene las últimas 10 copias.
+- Para restaurar, sustituye `data/vault.dat` por una copia antigua de `data/backups/` y abre la app con la contraseña correcta.
 
 ## Operaciones seguras
 

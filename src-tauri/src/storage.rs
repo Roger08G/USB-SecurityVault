@@ -38,6 +38,7 @@ struct DiskHeader {
 #[derive(Debug, Clone)]
 pub struct VaultPaths {
     pub root: PathBuf,
+    pub data: PathBuf,
     pub vault: PathBuf,
     pub config: PathBuf,
     pub backups: PathBuf,
@@ -47,17 +48,20 @@ pub struct VaultPaths {
 impl VaultPaths {
     pub fn from_root(root: impl Into<PathBuf>) -> Self {
         let root: PathBuf = root.into();
+        let data = root.join("data");
         Self {
-            vault: root.join("vault.dat"),
-            config: root.join("config.dat"),
-            backups: root.join("backups"),
+            vault: data.join("vault.dat"),
+            config: data.join("config.dat"),
+            backups: data.join("backups"),
             icons: root.join("icons"),
+            data,
             root,
         }
     }
 
     pub fn ensure_dirs(&self) -> VaultResult<()> {
         fs::create_dir_all(&self.root)?;
+        fs::create_dir_all(&self.data)?;
         fs::create_dir_all(&self.backups)?;
         fs::create_dir_all(&self.icons)?;
         Ok(())

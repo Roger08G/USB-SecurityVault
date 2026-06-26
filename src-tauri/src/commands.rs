@@ -55,7 +55,19 @@ fn resolve_root(app: &AppHandle, override_path: Option<String>) -> VaultResult<P
         .parent()
         .ok_or_else(|| VaultError::Internal("no exe parent".into()))?;
     let _ = app;
-    Ok(dir.to_path_buf())
+    let root = if dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.eq_ignore_ascii_case("linux"))
+        .unwrap_or(false)
+    {
+        dir.parent()
+            .map(|parent| parent.to_path_buf())
+            .unwrap_or_else(|| dir.to_path_buf())
+    } else {
+        dir.to_path_buf()
+    };
+    Ok(root)
 }
 
 #[derive(Serialize)]
@@ -495,7 +507,7 @@ fn is_supported_image(data: &[u8]) -> bool {
     false
 }
 
-/// Save an icon file to the `icons/` folder next to vault.dat.
+/// Save an icon file to the `icons/` folder next to the executable.
 /// `data` is the raw bytes sent from the frontend.
 #[tauri::command]
 pub fn save_icon(
@@ -581,10 +593,7 @@ pub fn get_icons_dir(app: AppHandle, root_override: Option<String>) -> VaultResu
 
 /// List all files in the `icons/` folder, returning names and absolute paths.
 #[tauri::command]
-pub fn list_icons(
-    app: AppHandle,
-    root_override: Option<String>,
-) -> VaultResult<Vec<UploadEntry>> {
+pub fn list_icons(app: AppHandle, root_override: Option<String>) -> VaultResult<Vec<UploadEntry>> {
     let root = resolve_root(&app, root_override)?;
     let icons_dir = VaultPaths::from_root(root).icons;
     if !icons_dir.exists() {
