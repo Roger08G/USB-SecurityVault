@@ -1,0 +1,9 @@
+[package]
+name = "usb-backup"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+walkdir = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
