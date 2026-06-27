@@ -1,6 +1,7 @@
 //! Tauri commands exposed to the frontend.
 
 use std::{
+    collections::HashMap,
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -163,9 +164,11 @@ pub fn vault_unlock(
     pwd_bytes.zeroize();
 
     match load_res {
-        Ok((key, data, _salt, header_bytes)) => {
+        Ok((key, mut data, _salt, header_bytes)) => {
             let icon_key = crate::crypto::derive_subkey(&key, b"icons.v1");
-            migrate_icons(&paths, &icon_key)?;
+            if migrate_icons(&paths, &icon_key, &mut data)? {
+                storage::save_vault(&paths.vault, &key, &header_bytes, &data)?;
+            }
             security::reset_failures(&mut cfg);
             let _ = storage::save_config(&paths.config, &cfg);
             let mut guard = state
@@ -519,23 +522,59 @@ fn is_supported_image(data: &[u8]) -> bool {
     false
 }
 
-fn icon_mime_from_name(name: &str) -> &'static str {
-    let logical_name = name.strip_suffix(".fenc").unwrap_or(name);
-    match Path::new(logical_name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("bmp") => "image/bmp",
-        Some("ico") | Some("cur") => "image/x-icon",
-        Some("svg") => "image/svg+xml",
-        _ => "application/octet-stream",
+fn icon_mime_from_data(data: &[u8]) -> &'static str {
+    if data.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
+        return "image/png";
     }
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return "image/jpeg";
+    }
+    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        return "image/gif";
+    }
+    if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        return "image/webp";
+    }
+    if data.starts_with(b"BM") {
+        return "image/bmp";
+    }
+    if data.len() >= 4
+        && data[0] == 0
+        && data[1] == 0
+        && (data[2] == 1 || data[2] == 2)
+        && data[3] == 0
+    {
+        return "image/x-icon";
+    }
+    if data.len() >= 5 {
+        let head = &data[..data.len().min(256)];
+        if let Ok(value) = std::str::from_utf8(head) {
+            let trimmed = value.trim_start();
+            if trimmed.starts_with("<?xml") || trimmed.starts_with("<svg") {
+                return "image/svg+xml";
+            }
+        }
+    }
+    "application/octet-stream"
+}
+
+fn random_hex_name() -> String {
+    hex::encode(crate::crypto::random_bytes::<32>())
+}
+
+fn is_random_hex_name(name: &str) -> bool {
+    name.len() == 64 && name.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+fn unique_random_icon_path(icons_dir: &Path) -> VaultResult<(String, PathBuf)> {
+    for _ in 0..16 {
+        let name = random_hex_name();
+        let path = icons_dir.join(&name);
+        if path.parent() == Some(icons_dir) && !path.exists() {
+            return Ok((name, path));
+        }
+    }
+    Err(VaultError::Crypto)
 }
 
 fn safe_icon_name(filename: &str) -> VaultResult<String> {
@@ -625,12 +664,105 @@ fn load_encrypted_icon(path: &Path, key: &crate::crypto::MasterKey) -> VaultResu
     Ok(pt)
 }
 
-fn migrate_icons(paths: &VaultPaths, icon_key: &crate::crypto::MasterKey) -> VaultResult<()> {
+fn icon_name_from_ref(icon: &str) -> Option<String> {
+    if icon.starts_with("data:") {
+        return None;
+    }
+    if let Some(name) = icon.strip_prefix("icon:") {
+        return Some(name.to_string());
+    }
+
+    let decoded = percent_decode_lossy(icon);
+    let normalized = decoded.replace('\\', "/");
+    let without_query = normalized.split(['?', '#']).next().unwrap_or("");
+    let candidate = without_query
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .last()?;
+    if candidate.is_empty() {
+        None
+    } else {
+        Some(candidate.to_string())
+    }
+}
+
+fn percent_decode_lossy(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0usize;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let hi = from_hex(bytes[index + 1]);
+            let lo = from_hex(bytes[index + 2]);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi << 4) | lo);
+                index += 3;
+                continue;
+            }
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn from_hex(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn update_icon_reference(icon: &mut Option<String>, renamed: &HashMap<String, String>) -> bool {
+    let Some(current) = icon.as_ref() else {
+        return false;
+    };
+    let Some(name) = icon_name_from_ref(current) else {
+        return false;
+    };
+    let Some(new_name) = renamed.get(&name) else {
+        return false;
+    };
+    *icon = Some(format!("icon:{new_name}"));
+    true
+}
+
+fn migrate_icons(
+    paths: &VaultPaths,
+    icon_key: &crate::crypto::MasterKey,
+    data: &mut VaultData,
+) -> VaultResult<bool> {
     fs::create_dir_all(&paths.icons)?;
+    let mut renamed: HashMap<String, String> = HashMap::new();
     let dir = fs::read_dir(&paths.icons).map_err(|e| VaultError::Internal(e.to_string()))?;
     for item in dir.flatten() {
         let path = item.path();
-        if !path.is_file() || icon_is_encrypted(&path).unwrap_or(false) {
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if name.ends_with(".tmp") {
+            continue;
+        }
+
+        let should_rename = !is_random_hex_name(name);
+        let (target_name, target_path) = if should_rename {
+            unique_random_icon_path(&paths.icons)?
+        } else {
+            (name.to_string(), path.clone())
+        };
+
+        if icon_is_encrypted(&path).unwrap_or(false) {
+            if should_rename {
+                fs::rename(&path, &target_path)?;
+                renamed.insert(name.to_string(), target_name);
+            }
             continue;
         }
 
@@ -640,11 +772,25 @@ fn migrate_icons(paths: &VaultPaths, icon_key: &crate::crypto::MasterKey) -> Vau
             continue;
         }
 
-        let save_res = save_encrypted_icon(&path, icon_key, &data);
+        let save_res = save_encrypted_icon(&target_path, icon_key, &data);
         data.zeroize();
         save_res?;
+        if should_rename {
+            let _ = fs::remove_file(&path);
+            renamed.insert(name.to_string(), target_name);
+        }
     }
-    Ok(())
+
+    let mut changed = false;
+    if !renamed.is_empty() {
+        for group in &mut data.groups {
+            changed |= update_icon_reference(&mut group.icon, &renamed);
+            for entry in &mut group.entries {
+                changed |= update_icon_reference(&mut entry.icon, &renamed);
+            }
+        }
+    }
+    Ok(changed)
 }
 
 /// Save an icon file to the `icons/` folder next to the executable.
@@ -677,31 +823,13 @@ pub fn save_icon(
         .map_err(|_| VaultError::Internal("poison".into()))?;
     let sess = require_unlocked(&mut guard)?;
 
-    // 3. Sanitise filename: keep only safe chars, strip any path components.
-    let safe = safe_icon_name(&filename)?;
+    // 3. Validate that the provided name is at least a sane file name. The stored
+    // name is always generated and does not expose the original filename.
+    let _ = safe_icon_name(&filename)?;
 
     // 4. Resolve the destination and verify it stays inside `icons_dir`
     //    (defence in depth against path traversal).
-    let mut dest = icons_dir.join(&safe);
-    if dest.parent() != Some(icons_dir.as_path()) {
-        return Err(VaultError::Invalid);
-    }
-    let mut stored_name = safe.clone();
-    if dest.exists() {
-        let path = std::path::Path::new(&safe);
-        let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("icon");
-        let ext = path.extension().and_then(|n| n.to_str()).unwrap_or("");
-        let suffix = Uuid::new_v4().simple().to_string();
-        stored_name = if ext.is_empty() {
-            format!("{}_{}", stem, suffix)
-        } else {
-            format!("{}_{}.{}", stem, suffix, ext)
-        };
-        dest = icons_dir.join(&stored_name);
-        if dest.parent() != Some(icons_dir.as_path()) {
-            return Err(VaultError::Invalid);
-        }
-    }
+    let (stored_name, dest) = unique_random_icon_path(&icons_dir)?;
 
     let save_res = save_encrypted_icon(&dest, &sess.icon_key, &data);
     data.zeroize();
@@ -747,9 +875,10 @@ pub fn read_icon(state: State<'_, AppState>, name: String) -> VaultResult<IconEn
         return Err(VaultError::Invalid);
     }
 
+    let data = load_encrypted_icon(&path, &sess.icon_key)?;
     Ok(IconEntry {
-        mime: icon_mime_from_name(&safe).to_string(),
-        data: load_encrypted_icon(&path, &sess.icon_key)?,
+        mime: icon_mime_from_data(&data).to_string(),
+        data,
         name: safe,
     })
 }
@@ -779,7 +908,7 @@ pub fn list_icons(state: State<'_, AppState>) -> VaultResult<Vec<IconEntry>> {
                 };
                 entries.push(IconEntry {
                     name: name.to_string(),
-                    mime: icon_mime_from_name(name).to_string(),
+                    mime: icon_mime_from_data(&data).to_string(),
                     data,
                 });
             }

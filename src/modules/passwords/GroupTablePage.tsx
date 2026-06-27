@@ -254,6 +254,41 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
             .catch(() => setIconSources({}));
     }, []);
 
+    useEffect(() => {
+        const names = entries
+            .map((entry) => extractIconName(entry.icon))
+            .filter((name): name is string => Boolean(name));
+        const missing = Array.from(new Set(names)).filter((name) => !iconSources[name]);
+
+        if (missing.length === 0) {
+            return;
+        }
+
+        let cancelled = false;
+        void Promise.all(
+            missing.map(async (name) => {
+                try {
+                    const icon = await api.readIcon(name);
+                    return [name, iconBytesToDataUrl(icon)] as const;
+                } catch {
+                    return null;
+                }
+            }),
+        ).then((items) => {
+            if (cancelled) {
+                return;
+            }
+            const loaded = items.filter((item): item is readonly [string, string] => Boolean(item));
+            if (loaded.length > 0) {
+                setIconSources((current) => ({ ...current, ...Object.fromEntries(loaded) }));
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [entries, iconSources]);
+
     const handleIconSaved = (name: string, src: string) => {
         setIconSources((current) => ({ ...current, [name]: src }));
     };

@@ -2,6 +2,7 @@ import type { IconBytes } from "./api";
 
 const ICON_PREFIX = "icon:";
 const IMAGE_EXTENSIONS = new Set(["bmp", "cur", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"]);
+const RANDOM_HEX_NAME = /^[a-f0-9]{64}$/i;
 
 export const toIconRef = (name: string) => `${ICON_PREFIX}${name}`;
 
@@ -20,7 +21,9 @@ export const extractIconName = (icon: string | null | undefined): string | null 
     const normalized = decoded.replace(/\\/g, "/").split(/[?#]/)[0];
     const parts = normalized.split("/").filter(Boolean);
     const candidate = parts[parts.length - 1];
-    if (!candidate || !candidate.includes(".")) return null;
+    if (!candidate) return null;
+    if (RANDOM_HEX_NAME.test(candidate)) return candidate;
+    if (!candidate.includes(".")) return null;
 
     const ext = candidate.split(".").pop()?.toLowerCase();
     return ext && IMAGE_EXTENSIONS.has(ext) ? candidate : null;

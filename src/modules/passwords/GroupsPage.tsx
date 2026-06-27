@@ -9,8 +9,8 @@ import { Input } from "@shared/components/Input";
 import { Modal } from "@shared/components/Modal";
 import { theme } from "@shared/theme";
 import {
+    extractIconName,
     iconBytesToDataUrl,
-    iconListToSources,
     resolveIconSrc,
     toIconRef,
     type IconSources,
@@ -224,10 +224,42 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
     useEffect(refresh, []);
 
     useEffect(() => {
-        api.listIcons()
-            .then((icons) => setIconSources(iconListToSources(icons)))
-            .catch(() => setIconSources({}));
-    }, []);
+        const missing = Array.from(
+            new Set(
+                groups
+                    .map((group) => extractIconName(group.icon))
+                    .filter((name): name is string => Boolean(name)),
+            ),
+        ).filter((name) => !iconSources[name]);
+
+        if (missing.length === 0) {
+            return;
+        }
+
+        let cancelled = false;
+        void Promise.all(
+            missing.map(async (name) => {
+                try {
+                    const icon = await api.readIcon(name);
+                    return [name, iconBytesToDataUrl(icon)] as const;
+                } catch {
+                    return null;
+                }
+            }),
+        ).then((items) => {
+            if (cancelled) {
+                return;
+            }
+            const loaded = items.filter((item): item is readonly [string, string] => Boolean(item));
+            if (loaded.length > 0) {
+                setIconSources((current) => ({ ...current, ...Object.fromEntries(loaded) }));
+            }
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [groups, iconSources]);
 
     const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
