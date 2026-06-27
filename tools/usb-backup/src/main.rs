@@ -118,8 +118,7 @@ fn validate_root(root: &Path) -> Result<()> {
 
 fn default_output_path(root: &Path) -> PathBuf {
     let stamp = Local::now().format("%Y%m%d-%H%M%S");
-    root.join("backups")
-        .join(format!("usb-backup-{stamp}.zip"))
+    root.join("backups").join(format!("usb-backup-{stamp}.zip"))
 }
 
 fn add_current_dat_files(

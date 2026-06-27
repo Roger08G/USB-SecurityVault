@@ -21,7 +21,7 @@ Solo comprobar referencias, sin modificar nada:
 Importar iconos antiguos desde una carpeta, cifrarlos y actualizar referencias:
 
 ```powershell
-.\scripts\encrypt-icons.exe --import-missing "C:\Users\Roger Gómez Martínez\Pictures"
+.\scripts\encrypt-icons.exe --import-missing "C:\Users\Roger Gomez Martinez\Pictures"
 ```
 
 Si la unidad cambia o lo ejecutas desde otra carpeta:
@@ -31,3 +31,39 @@ Si la unidad cambia o lo ejecutas desde otra carpeta:
 ```
 
 Pide la contrasena maestra. Salta los iconos que ya esten correctos.
+
+## usb-backup.exe
+
+Crea un ZIP con los `.dat` actuales de `data\`, todos los archivos de `icons\` y todos los archivos de `uploads\`.
+
+Uso normal, desde la raiz del pen:
+
+```powershell
+.\scripts\usb-backup.exe
+```
+
+Tambien puedes ejecutarlo desde cualquier carpeta usando la ruta completa:
+
+```powershell
+F:\scripts\usb-backup.exe
+```
+
+Guarda el backup por defecto en:
+
+```text
+backups\usb-backup-YYYYMMDD-HHMMSS.zip
+```
+
+Si la unidad cambia o quieres indicar la raiz manualmente:
+
+```powershell
+.\scripts\usb-backup.exe F:\
+```
+
+Si quieres elegir tambien el destino del ZIP:
+
+```powershell
+.\scripts\usb-backup.exe F:\ D:\Backups\usb.zip
+```
+
+Solo incluye los `.dat` activos de `data\`. No incluye historicos de `data\backups`.
