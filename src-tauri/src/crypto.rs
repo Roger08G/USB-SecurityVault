@@ -14,6 +14,7 @@ use chacha20poly1305::{
 use rand::{rngs::OsRng, RngCore};
 use secrecy::{ExposeSecret, SecretBox};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::{VaultError, VaultResult};
 
@@ -68,6 +69,38 @@ pub fn derive_key(password: &[u8], salt: &[u8], params: &KdfParams) -> VaultResu
         .map_err(|_| VaultError::Crypto)?;
 
     Ok(SecretBox::new(Box::new(out)))
+}
+
+pub fn derive_subkey(key: &MasterKey, context: &[u8]) -> MasterKey {
+    let mut hasher = Sha256::new();
+    hasher.update(b"usb-vault-subkey-v1");
+    hasher.update((context.len() as u64).to_le_bytes());
+    hasher.update(context);
+    hasher.update(key.expose_secret());
+
+    let digest = hasher.finalize();
+    let mut out = [0u8; KEY_LEN];
+    out.copy_from_slice(&digest[..KEY_LEN]);
+    SecretBox::new(Box::new(out))
+}
+
+pub fn encrypt(
+    key: &MasterKey,
+    aad: &[u8],
+    nonce_bytes: &[u8; NONCE_LEN],
+    plaintext: &[u8],
+) -> VaultResult<Vec<u8>> {
+    let cipher = XChaCha20Poly1305::new(key.expose_secret().into());
+    let nonce = XNonce::from_slice(nonce_bytes);
+    cipher
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad,
+            },
+        )
+        .map_err(|_| VaultError::Crypto)
 }
 
 pub fn decrypt(

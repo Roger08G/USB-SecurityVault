@@ -26,6 +26,12 @@ export class VaultError extends Error {
     }
 }
 
+export interface IconBytes {
+    name: string;
+    mime: string;
+    data: number[];
+}
+
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
     try {
         return await invoke<T>(cmd, args);
@@ -77,10 +83,11 @@ export const api = {
     generatePassword: (length: number, symbols: boolean) =>
         call<string>("generate_password", { length, symbols }),
 
-    saveIcon: (filename: string, data: number[]) =>
-        call<string>("save_icon", { filename, data }),
+    saveIcon: (filename: string, data: number[]) => call<string>("save_icon", { filename, data }),
 
-    listIcons: () => call<{ name: string; path: string }[]>("list_icons"),
+    readIcon: (name: string) => call<IconBytes>("read_icon", { name }),
+
+    listIcons: () => call<IconBytes[]>("list_icons"),
 
     getIconsDir: () => call<string>("get_icons_dir"),
 

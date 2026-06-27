@@ -61,6 +61,7 @@ pub fn run() {
             commands::reveal_password,
             commands::generate_password,
             commands::save_icon,
+            commands::read_icon,
             commands::list_icons,
             commands::get_icons_dir,
             commands::finance_get,

@@ -1,6 +1,11 @@
 //! Tauri commands exposed to the frontend.
 
-use std::{path::PathBuf, sync::Mutex};
+use std::{
+    fs,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -24,6 +29,7 @@ pub struct AppState {
 pub struct UnlockedSession {
     pub paths: VaultPaths,
     pub key: crate::crypto::MasterKey,
+    pub icon_key: crate::crypto::MasterKey,
     pub header_bytes: Vec<u8>,
     pub data: VaultData,
     pub totp_verified: bool,
@@ -148,6 +154,7 @@ pub fn vault_unlock(
     if !paths.vault_exists() {
         return Err(VaultError::NotInitialized);
     }
+    paths.ensure_dirs()?;
     let mut cfg = storage::load_config(&paths.config);
     security::check_rate_limit(&cfg)?;
 
@@ -157,6 +164,8 @@ pub fn vault_unlock(
 
     match load_res {
         Ok((key, data, _salt, header_bytes)) => {
+            let icon_key = crate::crypto::derive_subkey(&key, b"icons.v1");
+            migrate_icons(&paths, &icon_key)?;
             security::reset_failures(&mut cfg);
             let _ = storage::save_config(&paths.config, &cfg);
             let mut guard = state
@@ -166,6 +175,7 @@ pub fn vault_unlock(
             *guard = Some(UnlockedSession {
                 paths,
                 key,
+                icon_key,
                 header_bytes,
                 data,
                 totp_verified: false,
@@ -461,6 +471,8 @@ pub fn generate_password(length: usize, symbols: bool) -> String {
 
 /// Maximum size in bytes that an uploaded file may have (2 MiB).
 const MAX_UPLOAD_SIZE: usize = 2 * 1024 * 1024;
+const ICON_MAGIC: &[u8; 8] = b"UVICON1!";
+const ICON_FORMAT_VERSION: u16 = 1;
 
 /// Returns true if `data` looks like a supported image format
 /// based on its magic bytes (defence in depth — defeats `evil.exe` renamed `evil.png`).
@@ -507,13 +519,142 @@ fn is_supported_image(data: &[u8]) -> bool {
     false
 }
 
+fn icon_mime_from_name(name: &str) -> &'static str {
+    let logical_name = name.strip_suffix(".fenc").unwrap_or(name);
+    match Path::new(logical_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        Some("ico") | Some("cur") => "image/x-icon",
+        Some("svg") => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+}
+
+fn safe_icon_name(filename: &str) -> VaultResult<String> {
+    let base = Path::new(filename)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let safe: String = base
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .collect();
+    if safe.is_empty() || safe.starts_with('.') {
+        Err(VaultError::Invalid)
+    } else {
+        Ok(safe)
+    }
+}
+
+fn icon_is_encrypted(path: &Path) -> VaultResult<bool> {
+    let mut f = fs::File::open(path)?;
+    let mut magic = [0u8; 8];
+    match f.read_exact(&mut magic) {
+        Ok(()) => Ok(&magic == ICON_MAGIC),
+        Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(error) => Err(VaultError::Internal(error.to_string())),
+    }
+}
+
+fn save_encrypted_icon(
+    path: &Path,
+    key: &crate::crypto::MasterKey,
+    data: &[u8],
+) -> VaultResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let ver = ICON_FORMAT_VERSION.to_le_bytes();
+    let nonce: [u8; crate::crypto::NONCE_LEN] = crate::crypto::random_bytes();
+
+    let mut aad = Vec::with_capacity(8 + 2 + crate::crypto::NONCE_LEN);
+    aad.extend_from_slice(ICON_MAGIC);
+    aad.extend_from_slice(&ver);
+    aad.extend_from_slice(&nonce);
+
+    let ct = crate::crypto::encrypt(key, &aad, &nonce, data)?;
+    let tmp = path.with_extension("icon.tmp");
+    {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(ICON_MAGIC)?;
+        f.write_all(&ver)?;
+        f.write_all(&nonce)?;
+        f.write_all(&ct)?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+fn load_encrypted_icon(path: &Path, key: &crate::crypto::MasterKey) -> VaultResult<Vec<u8>> {
+    let mut f = fs::File::open(path)?;
+    let mut magic = [0u8; 8];
+    f.read_exact(&mut magic)?;
+    if &magic != ICON_MAGIC {
+        return Err(VaultError::Invalid);
+    }
+
+    let mut ver = [0u8; 2];
+    f.read_exact(&mut ver)?;
+    if u16::from_le_bytes(ver) != ICON_FORMAT_VERSION {
+        return Err(VaultError::Invalid);
+    }
+
+    let mut nonce = [0u8; crate::crypto::NONCE_LEN];
+    f.read_exact(&mut nonce)?;
+
+    let mut ct = Vec::new();
+    f.read_to_end(&mut ct)?;
+
+    let mut aad = Vec::with_capacity(8 + 2 + crate::crypto::NONCE_LEN);
+    aad.extend_from_slice(ICON_MAGIC);
+    aad.extend_from_slice(&ver);
+    aad.extend_from_slice(&nonce);
+
+    let pt = crate::crypto::decrypt(key, &aad, &nonce, &ct).map_err(|_| VaultError::Invalid)?;
+    ct.zeroize();
+    Ok(pt)
+}
+
+fn migrate_icons(paths: &VaultPaths, icon_key: &crate::crypto::MasterKey) -> VaultResult<()> {
+    fs::create_dir_all(&paths.icons)?;
+    let dir = fs::read_dir(&paths.icons).map_err(|e| VaultError::Internal(e.to_string()))?;
+    for item in dir.flatten() {
+        let path = item.path();
+        if !path.is_file() || icon_is_encrypted(&path).unwrap_or(false) {
+            continue;
+        }
+
+        let mut data = fs::read(&path)?;
+        if !is_supported_image(&data) {
+            data.zeroize();
+            continue;
+        }
+
+        let save_res = save_encrypted_icon(&path, icon_key, &data);
+        data.zeroize();
+        save_res?;
+    }
+    Ok(())
+}
+
 /// Save an icon file to the `icons/` folder next to the executable.
 /// `data` is the raw bytes sent from the frontend.
 #[tauri::command]
 pub fn save_icon(
     app: AppHandle,
+    state: State<'_, AppState>,
     filename: String,
-    data: Vec<u8>,
+    mut data: Vec<u8>,
     root_override: Option<String>,
 ) -> VaultResult<String> {
     // 1. Reject oversized payloads.
@@ -528,20 +669,16 @@ pub fn save_icon(
 
     let root = resolve_root(&app, root_override)?;
     let icons_dir = VaultPaths::from_root(root).icons;
-    std::fs::create_dir_all(&icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
+    fs::create_dir_all(&icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
+
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
+    let sess = require_unlocked(&mut guard)?;
 
     // 3. Sanitise filename: keep only safe chars, strip any path components.
-    let base = std::path::Path::new(&filename)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    let safe: String = base
-        .chars()
-        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
-        .collect();
-    if safe.is_empty() || safe.starts_with('.') {
-        return Err(VaultError::Invalid);
-    }
+    let safe = safe_icon_name(&filename)?;
 
     // 4. Resolve the destination and verify it stays inside `icons_dir`
     //    (defence in depth against path traversal).
@@ -566,17 +703,20 @@ pub fn save_icon(
         }
     }
 
-    std::fs::write(&dest, &data).map_err(|e| VaultError::Internal(e.to_string()))?;
+    let save_res = save_encrypted_icon(&dest, &sess.icon_key, &data);
+    data.zeroize();
+    save_res?;
 
     Ok(stored_name)
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UploadEntry {
+pub struct IconEntry {
     pub name: String,
     /// Absolute path to the file on disk — used with convertFileSrc() in the frontend.
-    pub path: String,
+    pub mime: String,
+    pub data: Vec<u8>,
 }
 
 /// Return the absolute path of the icons directory (creating it if needed).
@@ -591,29 +731,61 @@ pub fn get_icons_dir(app: AppHandle, root_override: Option<String>) -> VaultResu
         .ok_or_else(|| VaultError::Internal("non-UTF8 path".into()))
 }
 
-/// List all files in the `icons/` folder, returning names and absolute paths.
+/// Read one encrypted icon and return decrypted bytes for in-memory rendering.
 #[tauri::command]
-pub fn list_icons(app: AppHandle, root_override: Option<String>) -> VaultResult<Vec<UploadEntry>> {
-    let root = resolve_root(&app, root_override)?;
-    let icons_dir = VaultPaths::from_root(root).icons;
+pub fn read_icon(state: State<'_, AppState>, name: String) -> VaultResult<IconEntry> {
+    let safe = safe_icon_name(&name)?;
+
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
+    let sess = require_unlocked(&mut guard)?;
+
+    let path = sess.paths.icons.join(&safe);
+    if path.parent() != Some(sess.paths.icons.as_path()) || !path.exists() || !path.is_file() {
+        return Err(VaultError::Invalid);
+    }
+
+    Ok(IconEntry {
+        mime: icon_mime_from_name(&safe).to_string(),
+        data: load_encrypted_icon(&path, &sess.icon_key)?,
+        name: safe,
+    })
+}
+
+/// List all encrypted icons in the `icons/` folder, returning decrypted bytes for thumbnails.
+#[tauri::command]
+pub fn list_icons(state: State<'_, AppState>) -> VaultResult<Vec<IconEntry>> {
+    let mut guard = state
+        .inner
+        .lock()
+        .map_err(|_| VaultError::Internal("poison".into()))?;
+    let sess = require_unlocked(&mut guard)?;
+
+    let icons_dir = &sess.paths.icons;
     if !icons_dir.exists() {
         return Ok(vec![]);
     }
     let mut entries = vec![];
-    let dir = std::fs::read_dir(&icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
+    let dir = fs::read_dir(icons_dir).map_err(|e| VaultError::Internal(e.to_string()))?;
     for item in dir.flatten() {
         let path = item.path();
         if path.is_file() {
-            if let (Some(name), Some(abs)) =
-                (path.file_name().and_then(|n| n.to_str()), path.to_str())
-            {
-                entries.push(UploadEntry {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                let data = match load_encrypted_icon(&path, &sess.icon_key) {
+                    Ok(data) => data,
+                    Err(_) => continue,
+                };
+                entries.push(IconEntry {
                     name: name.to_string(),
-                    path: abs.to_string(),
+                    mime: icon_mime_from_name(name).to_string(),
+                    data,
                 });
             }
         }
     }
+    entries.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(entries)
 }
 

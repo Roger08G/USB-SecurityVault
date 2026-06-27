@@ -4,6 +4,12 @@ version = "1.0.0"
 description = "USB Vault - Portable encrypted password manager"
 authors = ["Roger Gomez"]
 edition = "2021"
+autobins = false
+default-run = "passwords"
+
+[[bin]]
+name = "passwords"
+path = "src/main.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -51,4 +57,3 @@ chrono = { version = "0.4", features = ["serde"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
-

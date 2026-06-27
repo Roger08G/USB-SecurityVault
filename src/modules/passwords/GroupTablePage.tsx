@@ -1,7 +1,6 @@
 /** @jsxImportSource @emotion/react */
 import { css } from "@emotion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
     FiArrowLeft,
     FiPlus,
@@ -24,10 +23,13 @@ import { theme } from "@shared/theme";
 import { copyEphemeral } from "@shared/clipboard";
 import {
     extractIconName,
+    iconBytesToDataUrl,
+    iconListToSources,
     isStoredImageIcon,
     normalizeIconForStorage,
     resolveIconSrc,
     toIconRef,
+    type IconSources,
 } from "@shared/iconAssets";
 
 interface GroupTablePageProps {
@@ -239,7 +241,7 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
     const [creating, setCreating] = useState(false);
     const [draft, setDraft] = useState<EntryInput>(emptyEntry);
     const [pendingDelete, setPendingDelete] = useState<EntryView | null>(null);
-    const [iconsDir, setIconsDir] = useState<string | null>(null);
+    const [iconSources, setIconSources] = useState<IconSources>({});
 
     const refresh = () => api.listEntries(group.id).then(setEntries);
     useEffect(() => {
@@ -247,10 +249,14 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
     }, [group.id]); // eslint-disable-line
 
     useEffect(() => {
-        api.getIconsDir()
-            .then(setIconsDir)
-            .catch(() => setIconsDir(null));
+        api.listIcons()
+            .then((icons) => setIconSources(iconListToSources(icons)))
+            .catch(() => setIconSources({}));
     }, []);
+
+    const handleIconSaved = (name: string, src: string) => {
+        setIconSources((current) => ({ ...current, [name]: src }));
+    };
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -365,9 +371,9 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
                         {filtered.map((e) => (
                             <tr key={e.id} css={rowStyles}>
                                 <td css={logoCell}>
-                                    {resolveIconSrc(e.icon, iconsDir) ? (
+                                    {resolveIconSrc(e.icon, iconSources) ? (
                                         <img
-                                            src={resolveIconSrc(e.icon, iconsDir) ?? ""}
+                                            src={resolveIconSrc(e.icon, iconSources) ?? ""}
                                             alt=""
                                             css={logoImgStyles}
                                         />
@@ -493,7 +499,8 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
             >
                 <EntryForm
                     draft={draft}
-                    iconsDir={iconsDir}
+                    iconSources={iconSources}
+                    onIconSaved={handleIconSaved}
                     setDraft={setDraft}
                     onSubmit={submitCreate}
                     onGenerate={generate}
@@ -510,7 +517,8 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
             >
                 <EntryForm
                     draft={draft}
-                    iconsDir={iconsDir}
+                    iconSources={iconSources}
+                    onIconSaved={handleIconSaved}
                     setDraft={setDraft}
                     onSubmit={submitEdit}
                     onGenerate={generate}
@@ -556,7 +564,8 @@ export function GroupTablePage({ group, onBack }: GroupTablePageProps) {
 
 interface EntryFormProps {
     draft: EntryInput;
-    iconsDir: string | null;
+    iconSources: IconSources;
+    onIconSaved: (name: string, src: string) => void;
     setDraft: (updater: (prev: EntryInput) => EntryInput) => void;
     onSubmit: (e: React.FormEvent, input: EntryInput) => void;
     onGenerate: () => void;
@@ -565,39 +574,30 @@ interface EntryFormProps {
 
 function EntryForm({
     draft,
-    iconsDir,
+    iconSources,
+    onIconSaved,
     setDraft,
     onSubmit,
     onGenerate,
     submitLabel,
 }: EntryFormProps) {
     const [tagsText, setTagsText] = useState(draft.tags.join(", "));
-    const [uploadedIcons, setUploadedIcons] = useState<
-        { name: string; src: string; ref: string }[]
-    >([]);
     const [showPwd, setShowPwd] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
+
+    const uploadedIcons = useMemo(
+        () =>
+            Object.entries(iconSources).map(([name, src]) => ({
+                name,
+                src,
+                ref: toIconRef(name),
+            })),
+        [iconSources],
+    );
 
     useEffect(() => {
         setTagsText(draft.tags.join(", "));
     }, [draft.tags]);
-
-    // Load previously uploaded icons
-    useEffect(() => {
-        api.listIcons()
-            .then((items: { name: string; path: string }[]) =>
-                setUploadedIcons(
-                    items.map((it) => ({
-                        name: it.name,
-                        src: convertFileSrc(it.path),
-                        ref: toIconRef(it.name),
-                    })),
-                ),
-            )
-            .catch(() => {
-                /* icons dir may not exist yet */
-            });
-    }, []);
 
     const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -605,17 +605,14 @@ function EntryForm({
         const arrayBuf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(arrayBuf));
         const safeName = await api.saveIcon(file.name, bytes);
-        const iconsPath = await api.getIconsDir();
+        const icon = await api.readIcon(safeName);
         const iconRef = toIconRef(safeName);
-        const iconSrc = convertFileSrc(`${iconsPath}/${safeName}`);
+        const iconSrc = iconBytesToDataUrl(icon);
+        onIconSaved(safeName, iconSrc);
         setDraft((d: EntryInput) => ({ ...d, icon: iconRef }));
-        setUploadedIcons((prev) => {
-            const exists = prev.some((u) => u.name === safeName);
-            return exists ? prev : [...prev, { name: safeName, src: iconSrc, ref: iconRef }];
-        });
     };
 
-    const previewSrc = resolveIconSrc(draft.icon, iconsDir);
+    const previewSrc = resolveIconSrc(draft.icon, iconSources);
 
     return (
         <form
@@ -714,9 +711,7 @@ function EntryForm({
                                 css={iconThumbStyles(
                                     draft.icon === u.ref || extractIconName(draft.icon) === u.name,
                                 )}
-                                onClick={() =>
-                                    setDraft((d: EntryInput) => ({ ...d, icon: u.ref }))
-                                }
+                                onClick={() => setDraft((d: EntryInput) => ({ ...d, icon: u.ref }))}
                             />
                         ))}
                     </div>

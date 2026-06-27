@@ -8,7 +8,13 @@ import { Button } from "@shared/components/Button";
 import { Input } from "@shared/components/Input";
 import { Modal } from "@shared/components/Modal";
 import { theme } from "@shared/theme";
-import { resolveIconSrc, toIconRef } from "@shared/iconAssets";
+import {
+    iconBytesToDataUrl,
+    iconListToSources,
+    resolveIconSrc,
+    toIconRef,
+    type IconSources,
+} from "@shared/iconAssets";
 
 interface GroupsPageProps {
     onBack: () => void;
@@ -205,7 +211,7 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
     const [name, setName] = useState("");
     const [desc, setDesc] = useState("");
     const [bannerIconRef, setBannerIconRef] = useState<string | null>(null);
-    const [iconsDir, setIconsDir] = useState<string | null>(null);
+    const [iconSources, setIconSources] = useState<IconSources>({});
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const refresh = () => {
@@ -218,9 +224,9 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
     useEffect(refresh, []);
 
     useEffect(() => {
-        api.getIconsDir()
-            .then(setIconsDir)
-            .catch(() => setIconsDir(null));
+        api.listIcons()
+            .then((icons) => setIconSources(iconListToSources(icons)))
+            .catch(() => setIconSources({}));
     }, []);
 
     const handleImagePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -230,10 +236,8 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
         const arrayBuf = await file.arrayBuffer();
         const bytes = Array.from(new Uint8Array(arrayBuf));
         const safeName = await api.saveIcon(file.name, bytes);
-        if (!iconsDir) {
-            const dir = await api.getIconsDir();
-            setIconsDir(dir);
-        }
+        const icon = await api.readIcon(safeName);
+        setIconSources((current) => ({ ...current, [safeName]: iconBytesToDataUrl(icon) }));
         setBannerIconRef(toIconRef(safeName));
     };
 
@@ -310,8 +314,11 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
                                 </div>
                             )}
                             <div css={cardImageStyles(idx)}>
-                                {resolveIconSrc(g.icon, iconsDir) ? (
-                                    <img src={resolveIconSrc(g.icon, iconsDir) ?? ""} alt={g.name} />
+                                {resolveIconSrc(g.icon, iconSources) ? (
+                                    <img
+                                        src={resolveIconSrc(g.icon, iconSources) ?? ""}
+                                        alt={g.name}
+                                    />
                                 ) : (
                                     <FiUsers />
                                 )}
@@ -339,8 +346,11 @@ export function GroupsPage({ onBack, onOpenGroup }: GroupsPageProps) {
                 <form css={formStyles} onSubmit={submitCreate}>
                     {/* Banner upload */}
                     <div css={uploadAreaStyles} onClick={() => fileInputRef.current?.click()}>
-                        {resolveIconSrc(bannerIconRef, iconsDir) ? (
-                            <img src={resolveIconSrc(bannerIconRef, iconsDir) ?? ""} alt="banner" />
+                        {resolveIconSrc(bannerIconRef, iconSources) ? (
+                            <img
+                                src={resolveIconSrc(bannerIconRef, iconSources) ?? ""}
+                                alt="banner"
+                            />
                         ) : (
                             <>
                                 <FiImage style={{ fontSize: 28 }} />
